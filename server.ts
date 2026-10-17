@@ -418,8 +418,11 @@ async function fetchInventoryFromSheet(force = false): Promise<Item[]> {
 async function startServer() {
   const app = express();
   app.set("trust proxy", true);
-  // Dev server must run on port 3000 as Nginx proxies 8080 -> 3000
-  const PORT = Number(process.env.DEFAULT_APP_PORT) || (process.env.PORT && process.env.PORT !== '8080' ? Number(process.env.PORT) : 3000);
+  // Dev server must run on port 3000 as Nginx proxies 8080 -> 3000 in AI Studio dev environment.
+  // When deployed / published to Cloud Run, DEFAULT_APP_PORT is unset and container must listen on process.env.PORT (8080).
+  const isDev = process.env.NODE_ENV === "development" && Boolean(process.env.DEFAULT_APP_PORT);
+  const isProduction = !isDev;
+  const PORT = isDev ? (Number(process.env.DEFAULT_APP_PORT) || 3000) : (Number(process.env.PORT) || 8080);
 
   // 1. Security Headers Middleware (compatible with AI Studio preview iframe)
   app.use((req, res, next) => {
@@ -3172,10 +3175,6 @@ ${getSystemEmployeeCatalogForAi()}
     }));
   }
 
-  // Robust production vs development mode detection
-  const isRunningFromBundle = typeof __filename !== "undefined" && (__filename.endsWith(".cjs") || __filename.includes("dist"));
-  const isProduction = process.env.NODE_ENV === "production" || isRunningFromBundle || (fs.existsSync(path.join(process.cwd(), "dist", "index.html")) && process.env.NODE_ENV !== "development");
-
   if (!isProduction) {
     // Dynamic import to avoid loading Vite into production bundle memory
     const { createServer: createViteServer } = await import("vite");
@@ -3195,6 +3194,9 @@ ${getSystemEmployeeCatalogForAi()}
     console.log(`[Production] Serving static files from: ${distPath}`);
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
+      if (req.path.startsWith("/api") || req.path.startsWith("/live")) {
+        return res.status(404).json({ error: "Endpoint not found" });
+      }
       const indexPath = path.join(distPath, "index.html");
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);

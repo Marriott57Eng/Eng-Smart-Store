@@ -1,4 +1,4 @@
-import { RequisitionRecord } from '../types';
+import type { RequisitionRecord } from '../types.ts';
 
 export const INVENTORY_QTY_OVERRIDES: Record<string, number> = {
   A000000001: 2,
