@@ -1,0 +1,11 @@
+{
+  "name": "MH57 ENG Store App V2",
+  "description": "แอปพลิเคชันจัดการคลังสินค้า Store ",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

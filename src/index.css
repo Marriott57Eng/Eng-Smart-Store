@@ -1,0 +1,339 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* iOS 27 Liquid Glass Utilities - High opacity to prevent blurry ghosting on mobile scroll */
+  .liquid-glass {
+    background: rgba(255, 255, 255, 0.98);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #cbd5e1;
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  }
+
+  .dark .liquid-glass {
+    background: rgba(15, 23, 42, 0.98);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #334155;
+    box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+
+  /* Universal Card: Razor-sharp 2px high-contrast borders, solid surface, elevated shadow */
+  .liquid-glass-card {
+    background: #ffffff;
+    border: 2px solid #cbd5e1;
+    box-shadow: 0 4px 18px -2px rgba(15, 23, 42, 0.09), 0 2px 6px -1px rgba(15, 23, 42, 0.05);
+    content-visibility: auto;
+    contain-intrinsic-size: 0 170px;
+    transform: translateZ(0);
+  }
+
+  .dark .liquid-glass-card {
+    background: #0f172a;
+    border: 2px solid #334155;
+    box-shadow: 0 8px 28px -2px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    content-visibility: auto;
+    contain-intrinsic-size: 0 170px;
+    transform: translateZ(0);
+  }
+
+  .liquid-glass-pill {
+    background: rgba(255, 255, 255, 0.95);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #cbd5e1;
+    box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.05);
+  }
+
+  .dark .liquid-glass-pill {
+    background: rgba(30, 41, 59, 0.95);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #475569;
+    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.4);
+  }
+
+  .liquid-glass-input {
+    background: #f8fafc;
+    border: 1.5px solid #cbd5e1;
+    box-shadow: inset 0 2px 4px 0 rgba(15, 23, 42, 0.04);
+  }
+
+  .dark .liquid-glass-input {
+    background: #1e293b;
+    border: 1.5px solid #475569;
+    box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  /* Specular rim glare */
+  .specular-rim {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 100%);
+  }
+
+  .dark .specular-rim {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0) 100%);
+  }
+}
+
+:root {
+  --app-font: 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif;
+}
+
+html[data-font="prompt"], body[data-font="prompt"] {
+  --app-font: 'Prompt', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html[data-font="kanit"], body[data-font="kanit"] {
+  --app-font: 'Kanit', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html[data-font="ibm-plex"], body[data-font="ibm-plex"] {
+  --app-font: 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html[data-font="chakra-petch"], body[data-font="chakra-petch"] {
+  --app-font: 'Chakra Petch', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html[data-font="mitr"], body[data-font="mitr"] {
+  --app-font: 'Mitr', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html[data-font="sarabun"], body[data-font="sarabun"] {
+  --app-font: 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html[data-font="system"], body[data-font="system"] {
+  --app-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif;
+}
+
+.font-preview-prompt { font-family: 'Prompt', sans-serif !important; }
+.font-preview-kanit { font-family: 'Kanit', sans-serif !important; }
+.font-preview-ibm-plex { font-family: 'IBM Plex Sans Thai', sans-serif !important; }
+.font-preview-chakra-petch { font-family: 'Chakra Petch', sans-serif !important; }
+.font-preview-mitr { font-family: 'Mitr', sans-serif !important; }
+.font-preview-sarabun { font-family: 'Sarabun', sans-serif !important; }
+.font-preview-system { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif !important; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scrollbar-gutter: stable;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  max-width: 100%;
+  font-family: var(--app-font);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #F8FAFC;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 100%;
+}
+
+.dark html, .dark body {
+  background-color: #020617;
+}
+
+body {
+  min-height: 100%;
+  min-height: 100dvh;
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+body.modal-open {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}
+
+#root {
+  min-height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Safe area insets for iOS Home Indicator, Status Bar, and Notch */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.px-safe {
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+}
+
+.pt-safe-header {
+  padding-top: max(12px, calc(env(safe-area-inset-top, 0px) + 10px));
+}
+
+.pt-safe-content {
+  padding-top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px));
+}
+
+/* Landscape Mode Responsive Adjustments for Phones & Tablets */
+@media (orientation: landscape) and (max-height: 520px) {
+  .pt-safe-header {
+    padding-top: max(6px, calc(env(safe-area-inset-top, 0px) + 4px));
+    padding-bottom: 6px;
+  }
+  .pt-safe-content {
+    padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 6px));
+  }
+}
+
+@media (orientation: landscape) {
+  body {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}
+
+/* Ensure inputs on iOS safari don't trigger automatic zoom */
+input, textarea, select {
+  font-size: 16px;
+}
+
+/* Device-responsive Auto-scaling */
+html[data-device="desktop"] {
+  font-size: 15.5px;
+}
+
+html[data-device="tablet"] {
+  font-size: 16px;
+}
+
+html[data-device="mobile"] {
+  font-size: 15px;
+}
+
+/* Custom refined scrollbar for Tablet and Desktop */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.4);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.7);
+  }
+}
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* ==========================================================================
+   High-Performance & Low-Spec Mode Optimization (Mobile / Tablet 60-120fps)
+   ========================================================================== */
+[data-low-spec="true"] .liquid-glass,
+[data-low-spec="true"] .liquid-glass-pill,
+[data-low-spec="true"] .liquid-glass-input,
+[data-low-spec="true"] header,
+[data-low-spec="true"] nav {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+[data-low-spec="true"] .liquid-glass {
+  background: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06) !important;
+}
+
+.dark[data-low-spec="true"] .liquid-glass,
+[data-low-spec="true"] .dark .liquid-glass,
+.dark [data-low-spec="true"] .liquid-glass {
+  background: rgba(15, 23, 42, 0.98) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-low-spec="true"] .liquid-glass-card {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04) !important;
+  transform: translateZ(0);
+}
+
+.dark[data-low-spec="true"] .liquid-glass-card,
+[data-low-spec="true"] .dark .liquid-glass-card,
+.dark [data-low-spec="true"] .liquid-glass-card {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+  transform: translateZ(0);
+}
+
+[data-low-spec="true"] .liquid-glass-pill {
+  background: rgba(248, 250, 252, 0.98) !important;
+}
+
+.dark[data-low-spec="true"] .liquid-glass-pill,
+[data-low-spec="true"] .dark .liquid-glass-pill,
+.dark [data-low-spec="true"] .liquid-glass-pill {
+  background: rgba(30, 41, 59, 0.98) !important;
+}
+
+/* Optimize scrolling on budget phones and tablets */
+main, .inventory-grid {
+  contain: paint;
+}
+
+/* Content visibility auto for cards to skip offscreen DOM layout */
+.item-card-container {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 170px;
+}
+
+/* Fix html2canvas FontMetrics baseline calculation with Tailwind CSS.
+   Tailwind's img { display: block } forces html2canvas's invisible measuring <img> onto a new line,
+   which shifts text baseline downward by 10-15px and slices rendered text in half vertically. */
+img[src^="data:image"] {
+  display: inline !important;
+}
+
