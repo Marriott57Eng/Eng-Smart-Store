@@ -6,6 +6,8 @@ export interface InventoryItem {
   qty: number; // Qty
   minStock: number; // MinStock
   location: string; // Location
+  brand?: string;
+  model?: string;
   note: string; // Note
   ordered: string; // Ordered
   orderedDate: string; // OrderedDate

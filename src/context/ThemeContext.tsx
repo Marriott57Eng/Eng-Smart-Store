@@ -11,18 +11,17 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+const THEME_STORAGE_KEY = 'eng_industrial_theme_v2';
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
     try {
-      const saved = localStorage.getItem('app_theme');
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
       if (saved === 'dark' || saved === 'light') {
         return saved;
       }
     } catch (_) {}
-    // Check system preference
-    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
-    }
+    // Industrial Command Pro defaults to Light Mode for high-visibility field operations
     return 'light';
   });
 
@@ -38,6 +37,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       root.style.colorScheme = 'light';
     }
     try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
       localStorage.setItem('app_theme', theme);
     } catch (_) {}
   }, [theme]);

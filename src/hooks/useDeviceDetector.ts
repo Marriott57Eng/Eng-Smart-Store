@@ -21,23 +21,60 @@ export interface DeviceInfo {
   setPerfMode: (mode: PerformanceMode) => void;
 }
 
-const checkIsLowSpec = (mode: PerformanceMode, isTouch: boolean, isMobile: boolean, isTablet: boolean): boolean => {
+const checkIsLowSpec = (
+  mode: PerformanceMode,
+  isTouch: boolean,
+  isMobile: boolean,
+  isTablet: boolean,
+  fpsDowngraded = false
+): boolean => {
   if (mode === 'smooth') return true;
   if (mode === 'high') return false;
+  if (fpsDowngraded) return true;
 
-  // Auto mode heuristic:
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return true;
+    }
+  }
+
   if (typeof navigator === 'undefined') return false;
-  const cores = navigator.hardwareConcurrency || 4;
-  const mem = (navigator as any).deviceMemory || 4;
 
-  // Most budget mobile phones & tablets have <= 4 cores or <= 4GB RAM
-  if ((isMobile || isTablet || isTouch) && (cores <= 4 || mem <= 4)) {
+  // Check Data Saver or slow network hints
+  const conn = (navigator as any).connection;
+  if (conn && (conn.saveData === true || conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g')) {
     return true;
   }
-  // If touch mobile/tablet, default to performance-friendly mode
-  if (isMobile) {
+
+  const ua = navigator.userAgent || '';
+
+  // Detect older iOS (iOS 15 or older) or older Android (Android 11 or older)
+  const iosMatch = ua.match(/OS (\d+)_/i);
+  if (iosMatch && parseInt(iosMatch[1], 10) <= 15) {
     return true;
   }
+  const androidMatch = ua.match(/Android (\d+)/i);
+  if (androidMatch && parseInt(androidMatch[1], 10) <= 11) {
+    return true;
+  }
+
+  const cores = navigator.hardwareConcurrency || 4;
+  // Note: Safari/iOS does not expose navigator.deviceMemory; default to 6 on modern iOS (>=16), 4 otherwise
+  const isModernIOS = Boolean(iosMatch && parseInt(iosMatch[1], 10) >= 16);
+  const mem = (navigator as any).deviceMemory || (isModernIOS ? 6 : 4);
+
+  // Older or budget phones/tablets with <= 4 CPU cores or <= 4GB RAM -> low-spec mode (reduce CPU load)
+  if (cores <= 4 || mem <= 4) {
+    return true;
+  }
+
+  // Mid-range Android phones with <= 6 cores and < 6GB RAM
+  if ((isMobile || isTablet || isTouch) && cores <= 6 && mem < 6 && !isModernIOS) {
+    return true;
+  }
+
+  // Newer high-speed phones (e.g. modern iPhone iOS 16+ with 6+ cores, or flagship Android with 8 cores & 6-12GB+ RAM)
+  // and modern tablets/desktops run with normal hardware-accelerated effects (isLowSpec = false)
   return false;
 };
 
@@ -50,7 +87,7 @@ const getStoredPerfMode = (): PerformanceMode => {
   return 'auto';
 };
 
-const calculateDeviceInfo = (currentPerfMode?: PerformanceMode): Omit<DeviceInfo, 'setPerfMode'> => {
+const calculateDeviceInfo = (currentPerfMode?: PerformanceMode, fpsDowngraded = false): Omit<DeviceInfo, 'setPerfMode'> => {
   if (typeof window === 'undefined') {
     return {
       deviceType: 'mobile',
@@ -115,7 +152,7 @@ const calculateDeviceInfo = (currentPerfMode?: PerformanceMode): Omit<DeviceInfo
   }
 
   const mode = currentPerfMode || getStoredPerfMode();
-  const isLowSpec = checkIsLowSpec(mode, Boolean(isTouch), isMobile, isTablet);
+  const isLowSpec = checkIsLowSpec(mode, Boolean(isTouch), isMobile, isTablet, fpsDowngraded);
 
   return {
     deviceType,
@@ -136,14 +173,18 @@ const calculateDeviceInfo = (currentPerfMode?: PerformanceMode): Omit<DeviceInfo
 
 export const useDeviceDetector = (): DeviceInfo => {
   const [perfMode, setPerfModeState] = useState<PerformanceMode>(getStoredPerfMode);
-  const [deviceInfo, setDeviceInfo] = useState(() => calculateDeviceInfo(perfMode));
+  const [fpsDowngraded, setFpsDowngraded] = useState<boolean>(false);
+  const [deviceInfo, setDeviceInfo] = useState(() => calculateDeviceInfo(perfMode, false));
 
   const setPerfMode = (mode: PerformanceMode) => {
     setPerfModeState(mode);
+    if (mode !== 'auto') {
+      setFpsDowngraded(false);
+    }
     try {
       localStorage.setItem('performance_mode', mode);
     } catch (_) {}
-    const next = calculateDeviceInfo(mode);
+    const next = calculateDeviceInfo(mode, mode === 'auto' ? fpsDowngraded : false);
     setDeviceInfo(next);
 
     if (typeof document !== 'undefined') {
@@ -152,9 +193,55 @@ export const useDeviceDetector = (): DeviceInfo => {
     }
   };
 
+  // Real-time adaptive frame-rate probe:
+  // If a phone/device is initially classified as high-spec in 'auto' mode, measure actual frame pacing
+  // over 45 frames (~750ms). If the CPU is throttled (e.g. Low Power Mode or older chip) and FPS < 42,
+  // automatically switch to low-spec mode to keep scrolling and interactions 100% smooth.
+  useEffect(() => {
+    if (typeof window === 'undefined' || perfMode !== 'auto' || deviceInfo.isLowSpec || fpsDowngraded) {
+      return;
+    }
+
+    let rafId: number;
+    let frameCount = 0;
+    let slowFrames = 0;
+    let lastTime = performance.now();
+    const TARGET_FRAMES = 45;
+
+    const checkFrame = (now: number) => {
+      const delta = now - lastTime;
+      lastTime = now;
+      // Ignore tab background switches (delta > 300ms)
+      if (delta > 0 && delta < 300) {
+        frameCount++;
+        // Frame took longer than ~28ms (< 35 FPS)
+        if (delta > 28) {
+          slowFrames++;
+        }
+      }
+
+      if (frameCount < TARGET_FRAMES) {
+        rafId = requestAnimationFrame(checkFrame);
+      } else if (slowFrames >= 12) {
+        // More than 25% of frames dropped below 35fps -> auto-enable CPU-saving low-spec mode
+        setFpsDowngraded(true);
+      }
+    };
+
+    const startTimeout = window.setTimeout(() => {
+      lastTime = performance.now();
+      rafId = requestAnimationFrame(checkFrame);
+    }, 600);
+
+    return () => {
+      clearTimeout(startTimeout);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [perfMode, deviceInfo.isLowSpec, fpsDowngraded]);
+
   useEffect(() => {
     const handleResize = () => {
-      const next = calculateDeviceInfo(perfMode);
+      const next = calculateDeviceInfo(perfMode, fpsDowngraded);
       setDeviceInfo(next);
 
       // Auto-tag HTML document element for high-performance CSS and typography rules
@@ -185,10 +272,11 @@ export const useDeviceDetector = (): DeviceInfo => {
         window.screen.orientation.removeEventListener('change', handleResize);
       }
     };
-  }, [perfMode]);
+  }, [perfMode, fpsDowngraded]);
 
   return {
     ...deviceInfo,
     setPerfMode,
   };
 };
+

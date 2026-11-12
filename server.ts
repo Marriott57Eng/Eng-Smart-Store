@@ -6,7 +6,7 @@ import { WebSocketServer } from "ws";
 import http from "http";
 import webpush from "web-push";
 import { initializeApp } from 'firebase/app';
-import { getFirestore, getDocs, collection, doc, setDoc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getFirestore, getDocs, collection, doc, setDoc, getDoc, deleteDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { 
   pushLineMessage, 
   pushPurchaseOrderLineMessage,
@@ -27,6 +27,19 @@ import {
   findEmployeeInSystem 
 } from './src/utils/employeeDirectory.ts';
 import { INVENTORY_QTY_OVERRIDES } from './src/data/initialData.ts';
+import { 
+  getInventoryFromDb, 
+  upsertInventoryItemToDb, 
+  getRequisitionsFromDb, 
+  insertRequisitionToDb, 
+  getPurchaseOrdersFromDb, 
+  upsertPurchaseOrderToDb, 
+  getUsersFromDb, 
+  upsertUserToDb, 
+  getSettingFromDb, 
+  saveSettingToDb 
+} from './src/db/repo.ts';
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
 // ==========================================
 // Web Push Notifications Engine (VAPID)
@@ -206,15 +219,6 @@ function getAI(): GoogleGenAI {
   return ai;
 }
 
-let firebaseConfig: any = { projectId: "", firestoreDatabaseId: "(default)" };
-try {
-  if (fs.existsSync('firebase-applet-config.json')) {
-    firebaseConfig = JSON.parse(fs.readFileSync('firebase-applet-config.json', 'utf-8'));
-  }
-} catch (err) {
-  console.warn("Could not load firebase-applet-config.json");
-}
-
 let firebaseApp: any = null;
 let firestoreDb: any = null;
 try {
@@ -338,10 +342,25 @@ async function fetchInventoryFromSheet(force = false): Promise<Item[]> {
     return cachedItems;
   }
 
+  // 1. Try Cloud SQL PostgreSQL Database
+  try {
+    const sqlItems = await getInventoryFromDb();
+    if (sqlItems.length > 0) {
+      cachedItems = sqlItems;
+      cacheTimestamp = Date.now();
+      return sqlItems;
+    }
+  } catch (err) {
+    console.warn("SQL database inventory query note:", err);
+  }
+
+  // 2. Fallback to Firestore
   const firestoreItems = await fetchInventoryFromFirestore();
   if (firestoreItems.length > 0) {
     cachedItems = firestoreItems;
     cacheTimestamp = Date.now();
+    // Seed into Cloud SQL in the background
+    Promise.allSettled(firestoreItems.map(item => upsertInventoryItemToDb(item))).catch(() => {});
     return firestoreItems;
   }
 
@@ -408,6 +427,8 @@ async function fetchInventoryFromSheet(force = false): Promise<Item[]> {
 
     cachedItems = items;
     cacheTimestamp = Date.now();
+    // Seed into Cloud SQL in the background
+    Promise.allSettled(items.map(item => upsertInventoryItemToDb(item))).catch(() => {});
     return items;
   } catch (err) {
     console.error('Error loading inventory sheet:', err);
@@ -599,11 +620,83 @@ async function startServer() {
       if (firestoreDb) {
         await setDoc(doc(firestoreDb, 'inventory', targetItem.id), targetItem);
       }
+      try {
+        await upsertInventoryItemToDb(targetItem);
+      } catch (sqlErr) {
+        console.warn("Could not save item to Cloud SQL:", sqlErr);
+      }
       cacheTimestamp = 0; // force refresh cache
 
       res.json({ success: true, item: targetItem });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API: Cloud SQL Requisitions, Orders & Users Endpoints
+  app.get("/api/requisitions", async (req, res) => {
+    try {
+      const records = await getRequisitionsFromDb();
+      res.json({ success: true, requisitions: records });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/requisitions", async (req, res) => {
+    try {
+      const record = req.body;
+      if (!record || !record.id || !record.itemId) {
+        return res.status(400).json({ success: false, error: "Invalid requisition record" });
+      }
+      await insertRequisitionToDb(record);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/orders", async (req, res) => {
+    try {
+      const orders = await getPurchaseOrdersFromDb();
+      res.json({ success: true, orders });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/orders", async (req, res) => {
+    try {
+      const order = req.body;
+      if (!order || !order.id || !order.itemId) {
+        return res.status(400).json({ success: false, error: "Invalid purchase order" });
+      }
+      await upsertPurchaseOrderToDb(order);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/users", async (req, res) => {
+    try {
+      const usersList = await getUsersFromDb();
+      res.json({ success: true, users: usersList });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
+    try {
+      const userObj = req.body;
+      if (!userObj || !userObj.id || !userObj.username) {
+        return res.status(400).json({ success: false, error: "Invalid user payload" });
+      }
+      await upsertUserToDb(userObj);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
@@ -1381,7 +1474,18 @@ async function startServer() {
 </html>`;
   }
 
-  // API: One-Click Purchase Order Confirmation from LINE (Web Action)
+  // Helper to strip undefined fields before writing to Firestore
+  function cleanServerFirestoreData<T extends Record<string, any>>(obj: T): T {
+    const cleaned: any = {};
+    for (const key of Object.keys(obj)) {
+      if (obj[key] !== undefined) {
+        cleaned[key] = obj[key];
+      }
+    }
+    return cleaned;
+  }
+
+  // API: One-Click Purchase Order Confirmation from LINE (Web Action - Atomic Transaction)
   app.get("/api/orders/confirm", async (req, res) => {
     try {
       const orderId = (req.query.orderId as string || '').trim();
@@ -1403,41 +1507,7 @@ async function startServer() {
         }));
       }
 
-      const orderRef = doc(firestoreDb, 'orders', orderId);
-      const orderSnap = await getDoc(orderRef);
-
-      if (!orderSnap.exists()) {
-        return res.status(404).send(renderConfirmHtml({
-          success: false,
-          title: "ไม่พบรายการสั่งซื้อ",
-          message: `ไม่พบใบสั่งซื้อรหัส "${orderId}" ในระบบ`,
-        }));
-      }
-
-      const orderData: any = orderSnap.data();
-
-      // STRICT SINGLE-USE LOCK:
-      // If status is not 'pending', or if confirmedAt exists, or if confirmationTokenUsed is true
-      const isAlreadyProcessed = orderData.status !== 'pending' || Boolean(orderData.confirmedAt) || Boolean(orderData.confirmationTokenUsed);
-      if (isAlreadyProcessed) {
-        return res.status(409).send(renderConfirmHtml({
-          success: false,
-          title: "🔒 คำสั่งซื้อนี้ถูกยืนยันไปแล้ว",
-          message: `ใบสั่งซื้อ "${orderId}" (${orderData.itemName}) ได้รับการยืนยันเสร็จสิ้นไปแล้วเมื่อ ${orderData.confirmedAt || 'ก่อนหน้านี้'} โดย ${orderData.confirmedBy || 'ผู้ดูแลระบบ'}<br><br>⚠️ <strong>ระบบป้องกันการยืนยันซ้ำ:</strong> คำสั่งซื้อสามารถกดยืนยันได้เพียง 1 ครั้งเท่านั้น และลิงก์นี้หมดอายุการใช้งานถาวรแล้ว`,
-          order: orderData,
-          alreadyConfirmed: true,
-        }));
-      }
-
-      // Check token if provided in order (or if token was already cleared)
-      if (orderData.confirmationToken && token && orderData.confirmationToken !== token) {
-        return res.status(403).send(renderConfirmHtml({
-          success: false,
-          title: "สิทธิ์การยืนยันไม่ถูกต้อง",
-          message: "Token การยืนยันไม่ตรงกับข้อมูลในระบบ หรือลิงก์นี้หมดอายุการใช้งานแล้ว",
-        }));
-      }
-
+      const nowIso = new Date().toISOString();
       const nowTimeStr = new Date().toLocaleString('th-TH', {
         timeZone: 'Asia/Bangkok',
         year: 'numeric',
@@ -1447,43 +1517,103 @@ async function startServer() {
         minute: '2-digit',
       });
 
-      // Update Firestore Order status to 'confirmed' and permanently consume confirmation token
-      const updatedOrder = {
-        ...orderData,
-        status: 'confirmed',
-        confirmedAt: nowTimeStr,
-        confirmedBy: 'Admin (ยืนยันผ่าน LINE)',
-        confirmedVia: 'line_url',
-        confirmationTokenUsed: true,
-        confirmationToken: null, // Permanently nullify token so it cannot be reused
-        isLocked: true,
-        updatedAt: new Date().toISOString(),
-      };
+      const txOutcome = await runTransaction(firestoreDb, async (transaction) => {
+        const orderRef = doc(firestoreDb, 'orders', orderId);
+        const orderSnap = await transaction.get(orderRef);
 
-      await setDoc(orderRef, updatedOrder, { merge: true });
-
-      // Also update inventory item's ordered status in Firestore
-      if (orderData.itemId) {
-        try {
-          const itemRef = doc(firestoreDb, 'inventory', orderData.itemId);
-          const itemSnap = await getDoc(itemRef);
-          if (itemSnap.exists()) {
-            await setDoc(itemRef, {
-              ordered: `สั่งซื้อแล้ว ${orderData.qty} ${orderData.unit} (${nowTimeStr})`,
-              orderedDate: new Date().toISOString(),
-            }, { merge: true });
-          }
-        } catch (itemErr) {
-          console.warn("Could not update item ordered date:", itemErr);
+        if (!orderSnap.exists()) {
+          return { status: 'not_found' as const };
         }
+
+        const orderData: any = orderSnap.data();
+
+        // STRICT SINGLE-USE LOCK inside atomic transaction
+        const isAlreadyProcessed =
+          orderData.status !== 'pending' ||
+          Boolean(orderData.confirmedAt) ||
+          Boolean(orderData.confirmationTokenUsed);
+
+        if (isAlreadyProcessed) {
+          return { status: 'already_confirmed' as const, orderData };
+        }
+
+        if (orderData.confirmationToken && token && orderData.confirmationToken !== token) {
+          return { status: 'invalid_token' as const, orderData };
+        }
+
+        const targetItemId = (orderData.itemId || '').trim();
+        const itemRef = targetItemId ? doc(firestoreDb, 'inventory', targetItemId) : null;
+        const itemSnap = itemRef ? await transaction.get(itemRef) : null;
+
+        const updatedOrder = cleanServerFirestoreData({
+          ...orderData,
+          id: orderData.id || orderId,
+          status: 'confirmed',
+          confirmedAt: nowTimeStr,
+          confirmedBy: 'Admin (ยืนยันผ่าน LINE)',
+          confirmedVia: 'line_url',
+          confirmationTokenUsed: true,
+          confirmationToken: null,
+          isLocked: true,
+          updatedAt: nowIso,
+        });
+
+        transaction.set(orderRef, updatedOrder, { merge: true });
+
+        if (itemRef && itemSnap?.exists()) {
+          transaction.set(
+            itemRef,
+            {
+              ordered: `สั่งซื้อแล้ว ${orderData.qty} ${orderData.unit} (${nowTimeStr})`,
+              orderedDate: nowIso,
+              lastUpdated: nowIso,
+            },
+            { merge: true }
+          );
+        }
+
+        return { status: 'confirmed' as const, orderData, updatedOrder };
+      });
+
+      if (txOutcome.status === 'not_found') {
+        return res.status(404).send(renderConfirmHtml({
+          success: false,
+          title: "ไม่พบรายการสั่งซื้อ",
+          message: `ไม่พบใบสั่งซื้อรหัส "${orderId}" ในระบบ`,
+        }));
       }
+
+      if (txOutcome.status === 'already_confirmed') {
+        const orderData = txOutcome.orderData;
+        return res.status(409).send(renderConfirmHtml({
+          success: false,
+          title: "🔒 คำสั่งซื้อนี้ถูกยืนยันไปแล้ว",
+          message: `ใบสั่งซื้อ "${orderId}" (${orderData.itemName}) ได้รับการยืนยันเสร็จสิ้นไปแล้วเมื่อ ${orderData.confirmedAt || 'ก่อนหน้านี้'} โดย ${orderData.confirmedBy || 'ผู้ดูแลระบบ'}<br><br>⚠️ <strong>ระบบป้องกันการยืนยันซ้ำ:</strong> คำสั่งซื้อสามารถกดยืนยันได้เพียง 1 ครั้งเท่านั้น และลิงก์นี้หมดอายุการใช้งานถาวรแล้ว`,
+          order: orderData,
+          alreadyConfirmed: true,
+        }));
+      }
+
+      if (txOutcome.status === 'invalid_token') {
+        return res.status(403).send(renderConfirmHtml({
+          success: false,
+          title: "สิทธิ์การยืนยันไม่ถูกต้อง",
+          message: "Token การยืนยันไม่ตรงกับข้อมูลในระบบ หรือลิงก์นี้หมดอายุการใช้งานแล้ว",
+        }));
+      }
+
+      const { orderData, updatedOrder } = txOutcome;
+
+      try {
+        await upsertPurchaseOrderToDb(updatedOrder);
+      } catch (_) {}
 
       // Send follow-up LINE message informing the group that order is confirmed
       try {
         const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
         const confirmFlex = createOrderConfirmedFlexMessage({
           order: {
-            id: orderData.id,
+            id: orderData.id || orderId,
             itemId: orderData.itemId,
             itemName: orderData.itemName,
             qty: orderData.qty,
@@ -1508,11 +1638,10 @@ async function startServer() {
         });
       } catch (_) {}
 
-      // Render confirmation web page
       return res.send(renderConfirmHtml({
         success: true,
         title: "ยืนยันการสั่งซื้อสำเร็จเรียบร้อย!",
-        message: "ระบบได้ทำการอัปเดตสถานะลงในฐานข้อมูล Firestore แล้ว และหน้าจอเว็บแอปพลิเคชันจะอัปเดตแบบ Real-time ทันที",
+        message: "ระบบได้ทำการอัปเดตสถานะลงในฐานข้อมูล Firestore แบบ Atomic Transaction แล้ว และหน้าจอเว็บแอปพลิเคชันจะอัปเดตแบบ Real-time ทันที",
         order: updatedOrder,
       }));
     } catch (error: any) {
@@ -1525,10 +1654,10 @@ async function startServer() {
     }
   });
 
-  // API: Confirm Purchase Order from Web Admin (Strict Admin only)
+  // API: Confirm Purchase Order from Web Admin (Strict Admin only, Atomic Transaction)
   app.post("/api/orders/confirm", async (req, res) => {
     try {
-      const { orderId, confirmedBy, userRole } = req.body;
+      const { orderId, confirmedBy, userRole, order: clientOrder, transactionCommitted } = req.body;
       if (!orderId) {
         return res.status(400).json({ success: false, error: "Missing orderId" });
       }
@@ -1542,29 +1671,7 @@ async function startServer() {
         });
       }
 
-      if (!firestoreDb) {
-        return res.status(500).json({ success: false, error: "Firestore not initialized" });
-      }
-
-      const orderRef = doc(firestoreDb, 'orders', orderId);
-      const orderSnap = await getDoc(orderRef);
-      if (!orderSnap.exists()) {
-        return res.status(404).json({ success: false, error: "Order not found" });
-      }
-
-      const orderData: any = orderSnap.data();
-
-      // Check if order is already confirmed or processed
-      const isAlreadyProcessed = orderData.status !== 'pending' || Boolean(orderData.confirmedAt) || Boolean(orderData.confirmationTokenUsed);
-      if (isAlreadyProcessed) {
-        return res.status(409).json({
-          success: false,
-          error: `คำสั่งซื้อ ${orderId} (${orderData.itemName}) ได้รับการยืนยันไปแล้วเมื่อ ${orderData.confirmedAt || 'ก่อนหน้านี้'} โดย ${orderData.confirmedBy || 'ผู้ดูแลระบบ'} (ไม่สามารถกดยืนยันซ้ำได้)`,
-          order: orderData,
-          alreadyConfirmed: true,
-        });
-      }
-
+      const nowIso = new Date().toISOString();
       const nowTimeStr = new Date().toLocaleString('th-TH', {
         timeZone: 'Asia/Bangkok',
         year: 'numeric',
@@ -1574,46 +1681,104 @@ async function startServer() {
         minute: '2-digit',
       });
 
-      const updatedOrder = {
-        ...orderData,
-        status: 'confirmed',
-        confirmedAt: nowTimeStr,
-        confirmedBy: confirmedBy || 'ผู้ดูแลระบบ (Admin Web)',
-        confirmedVia: 'admin_web',
-        confirmationTokenUsed: true,
-        confirmationToken: null,
-        isLocked: true,
-        updatedAt: new Date().toISOString(),
-      };
+      let updatedOrder: any = clientOrder;
 
-      await setDoc(orderRef, updatedOrder, { merge: true });
+      if (!transactionCommitted) {
+        if (!firestoreDb) {
+          return res.status(500).json({ success: false, error: "Firestore not initialized" });
+        }
 
-      // Update inventory item
-      if (orderData.itemId) {
-        try {
-          const itemRef = doc(firestoreDb, 'inventory', orderData.itemId);
-          await setDoc(itemRef, {
-            ordered: `สั่งซื้อแล้ว ${orderData.qty} ${orderData.unit} (${nowTimeStr})`,
-            orderedDate: new Date().toISOString(),
-          }, { merge: true });
-        } catch (_) {}
+        const txResult = await runTransaction(firestoreDb, async (transaction) => {
+          const orderRef = doc(firestoreDb, 'orders', orderId);
+          const orderSnap = await transaction.get(orderRef);
+          if (!orderSnap.exists() && !clientOrder) {
+            return { status: 'not_found' as const };
+          }
+
+          const orderData: any = orderSnap.exists() ? orderSnap.data() : clientOrder;
+          const isAlreadyProcessed =
+            orderData.status !== 'pending' ||
+            Boolean(orderData.confirmedAt) ||
+            Boolean(orderData.confirmationTokenUsed);
+
+          if (isAlreadyProcessed) {
+            return { status: 'already_confirmed' as const, orderData };
+          }
+
+          const targetItemId = (orderData.itemId || '').trim();
+          const itemRef = targetItemId ? doc(firestoreDb, 'inventory', targetItemId) : null;
+          const itemSnap = itemRef ? await transaction.get(itemRef) : null;
+
+          const nextOrder = cleanServerFirestoreData({
+            ...orderData,
+            id: orderData.id || orderId,
+            status: 'confirmed',
+            confirmedAt: nowTimeStr,
+            confirmedBy: confirmedBy || 'ผู้ดูแลระบบ (Admin Web)',
+            confirmedVia: 'admin_web',
+            confirmationTokenUsed: true,
+            confirmationToken: null,
+            isLocked: true,
+            updatedAt: nowIso,
+          });
+
+          transaction.set(orderRef, nextOrder, { merge: true });
+
+          if (itemRef && itemSnap?.exists()) {
+            transaction.set(
+              itemRef,
+              {
+                ordered: `สั่งซื้อแล้ว ${orderData.qty} ${orderData.unit} (${nowTimeStr})`,
+                orderedDate: nowIso,
+                lastUpdated: nowIso,
+              },
+              { merge: true }
+            );
+          }
+
+          return { status: 'confirmed' as const, nextOrder };
+        });
+
+        if (txResult.status === 'not_found') {
+          return res.status(404).json({ success: false, error: "Order not found" });
+        }
+
+        if (txResult.status === 'already_confirmed') {
+          const orderData = txResult.orderData;
+          return res.status(409).json({
+            success: false,
+            error: `คำสั่งซื้อ ${orderId} (${orderData.itemName}) ได้รับการยืนยันไปแล้วเมื่อ ${orderData.confirmedAt || 'ก่อนหน้านี้'} โดย ${orderData.confirmedBy || 'ผู้ดูแลระบบ'} (ไม่สามารถกดยืนยันซ้ำได้)`,
+            order: orderData,
+            alreadyConfirmed: true,
+          });
+        }
+
+        updatedOrder = txResult.nextOrder;
       }
 
-      // Notify LINE
-      try {
-        const confirmFlex = createOrderConfirmedFlexMessage({
-          order: {
-            id: orderData.id,
-            itemId: orderData.itemId,
-            itemName: orderData.itemName,
-            qty: orderData.qty,
-            unit: orderData.unit,
-            confirmedBy: confirmedBy || 'ผู้ดูแลระบบ (Admin Web)',
-            confirmedAt: nowTimeStr,
-          }
-        });
-        await pushPurchaseOrderLineMessage([confirmFlex]);
-      } catch (_) {}
+      if (updatedOrder) {
+        try {
+          await upsertPurchaseOrderToDb(updatedOrder);
+        } catch (sqlErr) {
+          console.warn("Could not save confirmed order to Cloud SQL:", sqlErr);
+        }
+
+        // Notify LINE
+        try {
+          const confirmFlex = createOrderConfirmedFlexMessage({
+            order: {
+              id: updatedOrder.id || orderId,
+              itemId: updatedOrder.itemId,
+              itemName: updatedOrder.itemName,
+              qty: updatedOrder.qty,
+              unit: updatedOrder.unit,
+              confirmedBy: updatedOrder.confirmedBy || confirmedBy || 'ผู้ดูแลระบบ (Admin Web)',
+              confirmedAt: updatedOrder.confirmedAt || nowTimeStr,
+            }
+          });
+          await pushPurchaseOrderLineMessage([confirmFlex]);
+        } catch (_) {}
+      }
 
       res.json({ success: true, order: updatedOrder });
     } catch (err: any) {
@@ -1622,34 +1787,27 @@ async function startServer() {
     }
   });
 
-  // API: Mark Order Received & Auto Stock In (Strict Admin only)
+  // API: Mark Order Received & Auto Stock In (Atomic Transaction across Orders, Inventory & Requisitions)
   app.post("/api/orders/receive", async (req, res) => {
     try {
-      const { orderId, receivedQty, receivedBy, userRole, note } = req.body;
+      const {
+        orderId,
+        receivedQty,
+        receivedBy,
+        note,
+        order: clientOrder,
+        currentItem: clientItem,
+        requisitionRecord: clientReqRecord,
+        expectedNewQty,
+        requisitionId,
+        transactionCommitted,
+      } = req.body;
+
       if (!orderId) {
         return res.status(400).json({ success: false, error: "Missing orderId" });
       }
 
-      const role = (userRole && typeof userRole === 'string' ? userRole.trim().toLowerCase() : '');
-      if (role !== 'admin') {
-        return res.status(403).json({
-          success: false,
-          error: "เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถรับสินค้าเข้าคลังจากคำสั่งซื้อได้",
-        });
-      }
-
-      if (!firestoreDb) {
-        return res.status(500).json({ success: false, error: "Firestore not initialized" });
-      }
-
-      const orderRef = doc(firestoreDb, 'orders', orderId);
-      const orderSnap = await getDoc(orderRef);
-      if (!orderSnap.exists()) {
-        return res.status(404).json({ success: false, error: "Order not found" });
-      }
-
-      const orderData: any = orderSnap.data();
-      const qtyToAdd = Number(receivedQty) || Number(orderData.qty) || 0;
+      const nowIso = new Date().toISOString();
       const nowTimeStr = new Date().toLocaleString('th-TH', {
         timeZone: 'Asia/Bangkok',
         year: 'numeric',
@@ -1658,95 +1816,170 @@ async function startServer() {
         hour: '2-digit',
         minute: '2-digit',
       });
+      const receiverName = receivedBy || 'เจ้าหน้าที่คลังสินค้า';
 
-      // 1. Update Order status to 'received'
-      const updatedOrder = {
-        ...orderData,
-        status: 'received',
-        receivedAt: nowTimeStr,
-        receivedBy: receivedBy || 'ผู้ดูแลระบบ',
-        updatedAt: new Date().toISOString(),
-      };
-      await setDoc(orderRef, updatedOrder, { merge: true });
+      let updatedOrder: any = clientOrder;
+      let updatedItem: any = clientItem;
+      let requisitionRecord: any = clientReqRecord;
 
-      // 2. Auto Stock In to Inventory item in Firestore (Update existing or auto-register new item)
-      let updatedItem: any = null;
-      const targetItemId = orderData.itemId || `ITEM-${Date.now().toString().slice(-6)}`;
-      try {
-        const itemRef = doc(firestoreDb, 'inventory', targetItemId);
-        const itemSnap = await getDoc(itemRef);
-        if (itemSnap.exists()) {
-          const currentItem = itemSnap.data() as any;
-          const newQty = (Number(currentItem.qty) || 0) + qtyToAdd;
-          const minStock = Number(currentItem.minStock) || 1;
-          const newStatus = newQty <= 0 ? 'out' : newQty <= minStock ? 'low' : 'normal';
+      if (!transactionCommitted && firestoreDb) {
+        // Execute atomic server-side Firestore transaction across Orders, Inventory, and Requisitions
+        const txResult = await runTransaction(firestoreDb, async (transaction) => {
+          const orderRef = doc(firestoreDb, 'orders', orderId);
+          const orderSnap = await transaction.get(orderRef);
 
-          updatedItem = {
-            ...currentItem,
+          const orderData: any = orderSnap.exists() ? orderSnap.data() : clientOrder;
+          if (!orderData) {
+            throw new Error("ไม่พบข้อมูลใบสั่งซื้อในระบบ");
+          }
+
+          if (orderData.status === 'received') {
+            const dupErr: any = new Error(
+              `ใบสั่งซื้อ ${orderId} ถูกรับสินค้าเข้าคลังไปแล้วเมื่อ ${orderData.receivedAt || 'ก่อนหน้านี้'}`
+            );
+            dupErr.alreadyReceived = true;
+            dupErr.order = orderData;
+            throw dupErr;
+          }
+
+          const targetItemId = (
+            orderData.itemId ||
+            clientItem?.id ||
+            `ITEM-${Date.now().toString().slice(-6)}`
+          ).trim();
+
+          const itemRef = doc(firestoreDb, 'inventory', targetItemId);
+          const itemSnap = await transaction.get(itemRef);
+
+          const reqId = (requisitionId && String(requisitionId).trim()) || `${Date.now().toString().slice(-6)}`;
+          const reqRef = doc(firestoreDb, 'requisitions', reqId);
+          const reqSnap = await transaction.get(reqRef);
+
+          const qtyToAdd = Number(receivedQty) > 0 ? Number(receivedQty) : (Number(orderData.qty) || 1);
+
+          let existingItem: any = itemSnap.exists() ? itemSnap.data() : null;
+          if (!existingItem && cachedItems.length > 0) {
+            existingItem = cachedItems.find(
+              i =>
+                i.id.trim().toLowerCase() === targetItemId.toLowerCase() ||
+                (orderData.itemName && i.name.trim().toLowerCase() === orderData.itemName.trim().toLowerCase())
+            );
+          }
+          if (!existingItem && clientItem) {
+            existingItem = clientItem;
+          }
+
+          const newQty =
+            typeof expectedNewQty === 'number' && !isNaN(expectedNewQty)
+              ? expectedNewQty
+              : (Number(existingItem?.qty) || 0) + qtyToAdd;
+          const minStock = Number(existingItem?.minStock) || Number(orderData.minStock) || 1;
+          const newStatus: 'normal' | 'low' | 'out' =
+            newQty <= 0 ? 'out' : newQty <= minStock ? 'low' : 'normal';
+
+          const nextItem = cleanServerFirestoreData({
+            ...(existingItem || {}),
+            id: existingItem?.id || targetItemId,
+            name: existingItem?.name || orderData.itemName || clientItem?.name || 'สินค้าสั่งซื้อ',
+            category: existingItem?.category || orderData.category || clientItem?.category || 'ทั่วไป',
+            unit: existingItem?.unit || orderData.unit || clientItem?.unit || 'ชิ้น',
             qty: newQty,
-            status: newStatus,
-            ordered: '', // Clear active ordered flag
-            outOfStockDate: newStatus === 'normal' ? '' : currentItem.outOfStockDate,
-          };
-          await setDoc(itemRef, updatedItem, { merge: true });
-        } else {
-          // Item was not in store: Auto-register into warehouse inventory upon receipt!
-          const minStock = 5;
-          const newStatus = qtyToAdd <= 0 ? 'out' : qtyToAdd <= minStock ? 'low' : 'normal';
-          updatedItem = {
-            id: targetItemId,
-            name: orderData.itemName,
-            category: orderData.category || 'อื่นๆ',
-            qty: qtyToAdd,
-            minStock: minStock,
-            unit: orderData.unit || 'ชิ้น',
-            location: orderData.location || 'Store FL.6',
-            brand: orderData.brand || '',
-            model: orderData.model || '',
+            minStock,
+            location: existingItem?.location || orderData.location || clientItem?.location || 'Store FL.6',
+            brand: existingItem?.brand || orderData.brand || '',
+            model: existingItem?.model || orderData.model || '',
+            note: existingItem?.note || '',
             status: newStatus,
             ordered: '',
             orderedDate: '',
-            note: `บันทึกเข้าคลังอัตโนมัติจากการสั่งซื้อ ${orderData.id}`,
-          };
-          await setDoc(itemRef, updatedItem);
+            outOfStockDate: newQty > 0 ? '' : (existingItem?.outOfStockDate || nowIso),
+            lastUpdated: nowIso,
+          });
+
+          const nextOrder = cleanServerFirestoreData({
+            ...orderData,
+            id: orderData.id || orderId,
+            itemId: nextItem.id,
+            itemName: nextItem.name,
+            qty: Number(orderData.qty) || qtyToAdd,
+            receivedQty: qtyToAdd,
+            receiveNote: note || '',
+            requestedBy: orderData.requestedBy || receiverName,
+            status: 'received',
+            receivedAt: nowTimeStr,
+            receivedBy: receiverName,
+            updatedAt: nowIso,
+          });
+
+          const finalReqId = reqSnap.exists() ? `${reqId}-${Date.now().toString().slice(-3)}` : reqId;
+          const finalReqRef = reqSnap.exists() ? doc(firestoreDb, 'requisitions', finalReqId) : reqRef;
+
+          const nextReq = cleanServerFirestoreData({
+            id: finalReqId,
+            type: 'in' as const,
+            itemId: nextItem.id,
+            itemName: nextItem.name,
+            category: nextItem.category,
+            qty: qtyToAdd,
+            unit: nextItem.unit,
+            requestedBy: receiverName,
+            purpose: `รับสินค้าตามใบสั่งซื้อ ${orderId}${note ? ` (${note})` : ''}`,
+            timestamp: nowTimeStr,
+            isoDate: nowIso,
+            note: `รับเข้าจากใบสั่งซื้อ PO: ${orderId}`,
+          });
+
+          transaction.set(orderRef, nextOrder, { merge: true });
+          transaction.set(itemRef, nextItem, { merge: true });
+          transaction.set(finalReqRef, nextReq);
+
+          return { nextOrder, nextItem, nextReq };
+        });
+
+        updatedOrder = txResult.nextOrder;
+        updatedItem = txResult.nextItem;
+        requisitionRecord = txResult.nextReq;
+      }
+
+      // Sync to Cloud SQL and Server in-memory cache
+      if (updatedOrder) {
+        try {
+          await upsertPurchaseOrderToDb(updatedOrder);
+        } catch (sqlErr) {
+          console.warn("Could not save received order to Cloud SQL:", sqlErr);
         }
-      } catch (itemErr) {
-        console.warn("Could not update item stock on receive:", itemErr);
       }
 
-      // 3. Create auto requisition record (Stock In)
-      try {
-        const reqId = `${Date.now().toString().slice(-6)}`;
-        const requisitionRecord = {
-          id: reqId,
-          type: 'in',
-          itemId: targetItemId,
-          itemName: orderData.itemName,
-          category: orderData.category || '',
-          qty: qtyToAdd,
-          unit: orderData.unit || 'ชิ้น',
-          requestedBy: receivedBy || 'ผู้ดูแลระบบ (รับของจากใบสั่งซื้อ)',
-          purpose: `รับสินค้าตามใบสั่งซื้อ ${orderData.id}${note ? ` (${note})` : ''}`,
-          timestamp: nowTimeStr,
-          isoDate: new Date().toISOString(),
-          note: `รับเข้าจากใบสั่งซื้อ PO: ${orderData.id}`,
-        };
-        await setDoc(doc(firestoreDb, 'requisitions', reqId), requisitionRecord);
-      } catch (reqErr) {
-        console.warn("Could not log stock-in requisition:", reqErr);
+      if (updatedItem) {
+        if (cachedItems.length > 0) {
+          const existsInCache = cachedItems.some(i => i.id === updatedItem.id);
+          cachedItems = existsInCache
+            ? cachedItems.map(i => (i.id === updatedItem.id ? updatedItem : i))
+            : [updatedItem, ...cachedItems];
+        }
+        try {
+          await upsertInventoryItemToDb(updatedItem);
+        } catch (_) {}
       }
 
-      // 4. Notify LINE about Stock In
+      if (requisitionRecord) {
+        try {
+          await insertRequisitionToDb(requisitionRecord);
+        } catch (_) {}
+      }
+
+      // Notify LINE about Stock In
       try {
+        const qtyToAdd = Number(receivedQty) || Number(updatedOrder?.receivedQty) || Number(updatedOrder?.qty) || 1;
         const stockFlex = createStockFlexMessage({
           type: 'in',
-          itemId: targetItemId,
-          itemName: orderData.itemName,
-          category: orderData.category,
+          itemId: updatedItem?.id || updatedOrder?.itemId || '',
+          itemName: updatedItem?.name || updatedOrder?.itemName || 'สินค้า',
+          category: updatedItem?.category || updatedOrder?.category || 'ทั่วไป',
           qty: qtyToAdd,
-          unit: orderData.unit || 'ชิ้น',
-          requestedBy: receivedBy || 'ผู้ดูแลระบบ',
-          purpose: `รับสินค้าเข้าคลังตามใบสั่งซื้อ ${orderData.id}`,
+          unit: updatedItem?.unit || updatedOrder?.unit || 'ชิ้น',
+          requestedBy: receiverName,
+          purpose: `รับสินค้าเข้าคลังตามใบสั่งซื้อ ${orderId}`,
           timestamp: nowTimeStr,
           newQty: updatedItem ? updatedItem.qty : undefined,
           status: updatedItem ? updatedItem.status : 'normal',
@@ -1754,8 +1987,16 @@ async function startServer() {
         await pushLineMessage([stockFlex]);
       } catch (_) {}
 
-      res.json({ success: true, order: updatedOrder, item: updatedItem });
+      res.json({ success: true, order: updatedOrder, item: updatedItem, requisition: requisitionRecord });
     } catch (err: any) {
+      if (err?.alreadyReceived) {
+        return res.status(409).json({
+          success: false,
+          error: err.message,
+          order: err.order,
+          alreadyReceived: true,
+        });
+      }
       console.error("Receive order error:", err);
       res.status(500).json({ success: false, error: err.message });
     }
@@ -1764,7 +2005,7 @@ async function startServer() {
   // API: Cancel Purchase Order (Strict Admin only)
   app.post("/api/orders/cancel", async (req, res) => {
     try {
-      const { orderId, reason, cancelledBy, userRole } = req.body;
+      const { orderId, reason, cancelledBy, userRole, order: clientOrder } = req.body;
       if (!orderId) {
         return res.status(400).json({ success: false, error: "Missing orderId" });
       }
@@ -1783,25 +2024,34 @@ async function startServer() {
 
       const orderRef = doc(firestoreDb, 'orders', orderId);
       const orderSnap = await getDoc(orderRef);
-      if (!orderSnap.exists()) {
+      if (!orderSnap.exists() && !clientOrder) {
         return res.status(404).json({ success: false, error: "Order not found" });
       }
 
-      const orderData: any = orderSnap.data();
-      const updatedOrder = {
+      const orderData: any = orderSnap.exists() ? orderSnap.data() : clientOrder;
+      const updatedOrder = cleanServerFirestoreData({
         ...orderData,
+        id: orderData.id || orderId,
         status: 'cancelled',
         cancelReason: reason || 'ยกเลิกโดยผู้ดูแลระบบ',
         cancelledBy: cancelledBy || 'ผู้ดูแลระบบ',
         updatedAt: new Date().toISOString(),
-      };
+      });
       await setDoc(orderRef, updatedOrder, { merge: true });
+      try {
+        await upsertPurchaseOrderToDb(updatedOrder);
+      } catch (sqlErr) {
+        console.warn("Could not save cancelled order to Cloud SQL:", sqlErr);
+      }
 
-      // Clear ordered flag on item
+      // Clear ordered flag on item if it exists in Firestore
       if (orderData.itemId) {
         try {
-          const itemRef = doc(firestoreDb, 'inventory', orderData.itemId);
-          await setDoc(itemRef, { ordered: '' }, { merge: true });
+          const itemRef = doc(firestoreDb, 'inventory', orderData.itemId.trim());
+          const itemSnap = await getDoc(itemRef);
+          if (itemSnap.exists()) {
+            await setDoc(itemRef, { ordered: '' }, { merge: true });
+          }
         } catch (_) {}
       }
 
@@ -2109,9 +2359,6 @@ async function startServer() {
             const config: any = {
               systemInstruction: "คุณคือ Ai Executive Supply Chain & Inventory Analyst ผู้เชี่ยวชาญการวิเคราะห์คลังสินค้า Store FL.6 ให้รายงานเชิงลึก มีการเว้นวรรค ใช้สัญลักษณ์สวยงาม น่าอ่าน และแม่นยำ"
             };
-            if (am.startsWith('gemini-')) {
-              config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
-            }
             const fallbackRes = await getAI().models.generateContent({
               model: am,
               contents: `${deepAnalysisInstruction}\n\n${prompt || 'วิเคราะห์สถานะคลังสินค้าแบบเจาะลึก'}\n\n${summaryText}`,
@@ -2385,7 +2632,7 @@ ${JSON.stringify(compactCatalog)}
         const reqId = `REQ-IN-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 6)}`;
         const requisitionRecord = {
           id: reqId,
-          type: 'in',
+          type: 'in' as const,
           itemId: itemId,
           itemName: updatedItem.name,
           category: updatedItem.category,
@@ -2405,6 +2652,13 @@ ${JSON.stringify(compactCatalog)}
           } catch (syncErr) {
             console.warn("Firestore sync error for bulk item:", itemId, syncErr);
           }
+        }
+
+        try {
+          await upsertInventoryItemToDb(updatedItem);
+          await insertRequisitionToDb(requisitionRecord);
+        } catch (sqlSyncErr) {
+          console.warn("Cloud SQL sync error for bulk item:", itemId, sqlSyncErr);
         }
 
         updatedItems.push(updatedItem);
@@ -2745,10 +2999,6 @@ ${getSystemEmployeeCatalogForAi()}
         }
 
         const config: any = { systemInstruction, temperature: 0.2 };
-        // Set minimal thinking for Gemini models to ensure instant sub-second response
-        if (modelName.startsWith('gemini-')) {
-          config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
-        }
 
         const modelAbortController = new AbortController();
         let isTimedOut = false;
@@ -3799,11 +4049,6 @@ ${getSystemEmployeeCatalogForAi()}
         }
       } catch (e) { }
     });
-  });
-
-  // Pre-warm inventory cache immediately on startup (safe background task)
-  fetchInventoryFromSheet().catch((err) => {
-    console.warn("Initial inventory warm-up notice:", err?.message || err);
   });
 
   server.on("error", (err: any) => {

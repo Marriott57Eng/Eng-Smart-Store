@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useDeferredValue } from 'react';
 import { RequisitionRecord, InventoryItem } from '../types';
 import { 
   ClipboardList, Search, Clock, MapPin,
@@ -30,39 +30,72 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
   onEditRecord,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [typeFilter, setTypeFilter] = useState<'all' | 'out' | 'in'>('all');
 
   const getCategoryColor = (_cat?: string) => {
     return 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border-slate-200/90 dark:border-slate-700/80';
   };
 
-  // Filtered records by search and type
-  const filteredRecords = records.filter((rec) => {
-    const matchesType = 
-      typeFilter === 'all' 
-        ? true 
-        : typeFilter === 'in' 
-        ? rec.type === 'in' 
-        : (rec.type === 'out' || !rec.type);
+  // O(1) lookup maps for inventory items by ID and Name to eliminate O(N*M) array scans per card
+  const itemLookup = useMemo(() => {
+    const byId = new Map<string, InventoryItem>();
+    const byName = new Map<string, InventoryItem>();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.id) byId.set(it.id, it);
+      if (it.name) byName.set(it.name, it);
+    }
+    return { byId, byName };
+  }, [items]);
 
-    const matchesSearch =
-      rec.requestedBy.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.itemId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.purpose.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.category.toLowerCase().includes(searchTerm.toLowerCase());
+  // Single-pass memoized statistics
+  const { totalWithdrawn, totalReceived, outRecordsCount, inRecordsCount } = useMemo(() => {
+    let withdrawn = 0;
+    let received = 0;
+    let outCount = 0;
+    let inCount = 0;
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      if (r.type === 'in') {
+        received += r.qty;
+        inCount++;
+      } else {
+        withdrawn += r.qty;
+        outCount++;
+      }
+    }
+    return {
+      totalWithdrawn: withdrawn,
+      totalReceived: received,
+      outRecordsCount: outCount,
+      inRecordsCount: inCount,
+    };
+  }, [records]);
 
-    return matchesType && matchesSearch;
-  });
+  // Filtered records by deferred search and type
+  const filteredRecords = useMemo(() => {
+    const q = deferredSearchTerm.trim().toLowerCase();
+    return records.filter((rec) => {
+      const matchesType =
+        typeFilter === 'all'
+          ? true
+          : typeFilter === 'in'
+          ? rec.type === 'in'
+          : rec.type === 'out' || !rec.type;
 
-  // Calculate quick stats
-  const totalWithdrawn = records
-    .filter((r) => r.type === 'out' || !r.type)
-    .reduce((sum, r) => sum + r.qty, 0);
+      if (!matchesType) return false;
+      if (!q) return true;
 
-  const totalReceived = records
-    .filter((r) => r.type === 'in')
-    .reduce((sum, r) => sum + r.qty, 0);
+      return (
+        rec.requestedBy.toLowerCase().includes(q) ||
+        rec.itemName.toLowerCase().includes(q) ||
+        rec.itemId.toLowerCase().includes(q) ||
+        rec.purpose.toLowerCase().includes(q) ||
+        rec.category.toLowerCase().includes(q)
+      );
+    });
+  }, [records, deferredSearchTerm, typeFilter]);
 
   return (
     <div className="flex flex-col min-h-full transition-colors duration-200">
@@ -156,18 +189,18 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
             }`}
           >
             <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />
-            เบิกออก ({records.filter((r) => r.type === 'out' || !r.type).length})
+            เบิกออก ({outRecordsCount})
           </button>
           <button
             onClick={() => setTypeFilter('in')}
             className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs active:scale-95 border ${
               typeFilter === 'in'
                 ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/40 hover:opacity-90'
+                : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-red-800/40 hover:opacity-90'
             }`}
           >
             <ArrowDownRight className="w-3.5 h-3.5 stroke-[2.5]" />
-            รับเข้า ({records.filter((r) => r.type === 'in').length})
+            รับเข้า ({inRecordsCount})
           </button>
         </div>
 
@@ -213,9 +246,9 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
             {filteredRecords.map((record) => {
             const isStockIn = record.type === 'in';
             
-            // Find current inventory item matching this record
-            const currentItem = items.find((i) => i.id === record.itemId) || 
-                                 items.find((i) => i.name === record.itemName);
+            // O(1) Map lookup for current inventory item matching this record
+            const currentItem = itemLookup.byId.get(record.itemId) || 
+                                 itemLookup.byName.get(record.itemName);
             
             const currentQty = currentItem ? currentItem.qty : null;
             const currentUnit = currentItem ? currentItem.unit : record.unit;
@@ -224,8 +257,9 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
             return (
               <div
                 key={record.id}
-                className="liquid-glass-card rounded-[26px] border-2 border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-4 sm:p-5 shadow-md hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all space-y-3 relative overflow-hidden w-full min-w-0 box-border"
+                className="item-card-container liquid-glass-card rounded-[26px] border-2 border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-4 sm:p-5 shadow-md hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-colors space-y-3 relative overflow-hidden w-full min-w-0 box-border"
               >
+
                 {/* Top: User Info, Type Badge & Timestamp */}
                 <div className="flex items-start justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
                   <div className="flex items-center gap-2.5">

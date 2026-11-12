@@ -40,6 +40,7 @@ interface StatsDashboardProps {
   onRefresh: () => void;
   loading: boolean;
   initialSubTab?: 'overview' | 'categories';
+  isLowSpec?: boolean;
 }
 
 export const StatsDashboard: React.FC<StatsDashboardProps> = ({
@@ -53,6 +54,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
   onRefresh,
   loading,
   initialSubTab = 'overview',
+  isLowSpec = false,
 }) => {
   const [viewMode, setViewMode] = useState<'overview' | 'categories'>(initialSubTab || 'overview');
 
@@ -62,7 +64,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
     }
   }, [initialSubTab]);
 
-  const lowStockItems = items.filter(i => i.status === 'low' || i.status === 'out');
+  const lowStockItems = useMemo(() => items.filter(i => i.status === 'low' || i.status === 'out'), [items]);
 
   // --- TIME BOUNDARIES & ANALYTICS ---
   const currentMonthStart = startOfMonth(new Date());
@@ -350,6 +352,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
             summary={summary}
             items={items}
             onSelectCategory={onSelectCategory}
+            isLowSpec={isLowSpec}
           />
         </div>
       ) : (
@@ -745,6 +748,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                     name="ยอดเบิกจ่าย (ออก)" 
                     fill="#3B82F6" 
                     radius={[6, 6, 0, 0]} 
+                    isAnimationActive={!isLowSpec}
                     cursor="pointer"
                     onClick={(entry: any) => {
                       const cat = entry?.category || entry?.payload?.category;
@@ -756,6 +760,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                     name="ยอดรับเข้า (เข้า)" 
                     fill="#10B981" 
                     radius={[6, 6, 0, 0]} 
+                    isAnimationActive={!isLowSpec}
                     cursor="pointer"
                     onClick={(entry: any) => {
                       const cat = entry?.category || entry?.payload?.category;
@@ -780,6 +785,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                       innerRadius={55}
                       outerRadius={95}
                       paddingAngle={3}
+                      isAnimationActive={!isLowSpec}
                       cursor="pointer"
                       onClick={(entry: any) => {
                         const cat = entry?.category || entry?.name || entry?.payload?.category;
@@ -950,8 +956,8 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" opacity={0.2} />
                   <XAxis type="number" stroke="#94a3b8" />
                   <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '16px', border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(16px)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)', backgroundColor: 'rgba(15,23,42,0.85)', color: '#f8fafc' }} />
-                  <Bar dataKey="qty" name="จำนวนที่เบิก" fill="#10B981" radius={[0, 6, 6, 0]} />
+                  <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '16px', border: '1px solid rgba(255,255,255,0.2)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)', backgroundColor: 'rgba(15,23,42,0.94)', color: '#f8fafc' }} />
+                  <Bar dataKey="qty" name="จำนวนที่เบิก" fill="#10B981" radius={[0, 6, 6, 0]} isAnimationActive={!isLowSpec} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -971,8 +977,8 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" />
                   <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <RechartsTooltip cursor={{fill: 'rgba(100,116,139,0.08)'}} contentStyle={{ borderRadius: '16px', border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(16px)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)', backgroundColor: 'rgba(15,23,42,0.85)', color: '#f8fafc' }} />
-                  <Bar dataKey="qty" name="จำนวนรวม" fill="#3B82F6" radius={[6, 6, 0, 0]} />
+                  <RechartsTooltip cursor={{fill: 'rgba(100,116,139,0.08)'}} contentStyle={{ borderRadius: '16px', border: '1px solid rgba(255,255,255,0.2)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)', backgroundColor: 'rgba(15,23,42,0.94)', color: '#f8fafc' }} />
+                  <Bar dataKey="qty" name="จำนวนรวม" fill="#3B82F6" radius={[6, 6, 0, 0]} isAnimationActive={!isLowSpec} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -992,8 +998,8 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-45} textAnchor="end" height={60} stroke="#94a3b8" />
                   <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <RechartsTooltip cursor={{fill: 'rgba(100,116,139,0.08)'}} contentStyle={{ borderRadius: '16px', border: '1px solid rgba(255,255,255,0.2)', backdropFilter: 'blur(16px)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)', backgroundColor: 'rgba(15,23,42,0.85)', color: '#f8fafc' }} />
-                  <Bar dataKey="days" name="จำนวนวัน" fill="#EF4444" radius={[6, 6, 0, 0]}>
+                  <RechartsTooltip cursor={{fill: 'rgba(100,116,139,0.08)'}} contentStyle={{ borderRadius: '16px', border: '1px solid rgba(255,255,255,0.2)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)', backgroundColor: 'rgba(15,23,42,0.94)', color: '#f8fafc' }} />
+                  <Bar dataKey="days" name="จำนวนวัน" fill="#EF4444" radius={[6, 6, 0, 0]} isAnimationActive={!isLowSpec}>
                     {outOfStockDurations.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.days > 7 ? '#EF4444' : '#F87171'} />
                     ))}

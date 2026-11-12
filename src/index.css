@@ -20,77 +20,67 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* iOS 27 Liquid Glass Utilities - High opacity to prevent blurry ghosting on mobile scroll */
+  /* Industrial Command Pro Surface System - Crisp 1px borders, high-contrast solid surfaces */
   .liquid-glass {
-    background: rgba(255, 255, 255, 0.98);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    border: 1.5px solid #cbd5e1;
-    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
   }
 
   .dark .liquid-glass {
-    background: rgba(15, 23, 42, 0.98);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    border: 1.5px solid #334155;
-    box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    background: #111827;
+    border: 1px solid #1e293b;
+    box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.45);
   }
 
-  /* Universal Card: Razor-sharp 2px high-contrast borders, solid surface, elevated shadow */
+  /* Universal Industrial Card: Crisp 1px border, solid high-contrast surface, zero blur overhead */
   .liquid-glass-card {
     background: #ffffff;
-    border: 2px solid #cbd5e1;
-    box-shadow: 0 4px 18px -2px rgba(15, 23, 42, 0.09), 0 2px 6px -1px rgba(15, 23, 42, 0.05);
-    content-visibility: auto;
-    contain-intrinsic-size: 0 170px;
-    transform: translateZ(0);
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
   }
 
   .dark .liquid-glass-card {
-    background: #0f172a;
-    border: 2px solid #334155;
-    box-shadow: 0 8px 28px -2px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
-    content-visibility: auto;
-    contain-intrinsic-size: 0 170px;
-    transform: translateZ(0);
+    background: #111827;
+    border: 1px solid #1e293b;
+    box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.45);
   }
 
   .liquid-glass-pill {
-    background: rgba(255, 255, 255, 0.95);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    border: 1.5px solid #cbd5e1;
-    box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.05);
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    box-shadow: none;
   }
 
   .dark .liquid-glass-pill {
-    background: rgba(30, 41, 59, 0.95);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    border: 1.5px solid #475569;
-    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.4);
+    background: #1e293b;
+    border: 1px solid #334155;
+    box-shadow: none;
   }
 
   .liquid-glass-input {
     background: #f8fafc;
-    border: 1.5px solid #cbd5e1;
-    box-shadow: inset 0 2px 4px 0 rgba(15, 23, 42, 0.04);
+    border: 1px solid #cbd5e1;
+    box-shadow: inset 0 1px 2px 0 rgba(15, 23, 42, 0.03);
   }
 
   .dark .liquid-glass-input {
-    background: #1e293b;
-    border: 1.5px solid #475569;
-    box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.3);
+    background: #0f172a;
+    border: 1px solid #334155;
+    box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 
   /* Specular rim glare */
   .specular-rim {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 100%);
+    background: none;
   }
 
   .dark .specular-rim {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0) 100%);
+    background: none;
   }
 }
 
@@ -274,60 +264,84 @@ code, pre {
 }
 
 /* ==========================================================================
-   High-Performance & Low-Spec Mode Optimization (Mobile / Tablet 60-120fps)
+   Adaptive Performance Engine:
+   1. Low-Spec / Older Phones ([data-low-spec="true"]):
+      Eliminates backdrop-filter blurs, large Gaussian blur orbs, continuous
+      idle animations, and heavy multi-layer shadows to keep CPU load near 0%
+      and scrolling locked at 60fps.
+   2. High-Spec / Newer Phones & Desktops ([data-low-spec="false"]):
+      Uses GPU hardware-accelerated glass blurs, smooth spring transitions,
+      and rich depth shadows.
    ========================================================================== */
-[data-low-spec="true"] .liquid-glass,
-[data-low-spec="true"] .liquid-glass-pill,
-[data-low-spec="true"] .liquid-glass-input,
-[data-low-spec="true"] header,
-[data-low-spec="true"] nav {
+[data-low-spec="true"] *,
+[data-low-spec="true"] *::before,
+[data-low-spec="true"] *::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
 
+/* Hide expensive full-screen Gaussian blur ambient orbs on older phones */
+[data-low-spec="true"] .blur-3xl,
+[data-low-spec="true"] .blur-2xl {
+  display: none !important;
+}
+
+/* Stop continuous idle CPU repaints from decorative pulse/ping badges on older phones */
+[data-low-spec="true"] .animate-ping {
+  animation: none !important;
+  display: none !important;
+}
+
+[data-low-spec="true"] .animate-pulse {
+  animation: none !important;
+}
+
 [data-low-spec="true"] .liquid-glass {
-  background: rgba(255, 255, 255, 0.98) !important;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06) !important;
+  background: #ffffff !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05) !important;
 }
 
 .dark[data-low-spec="true"] .liquid-glass,
 [data-low-spec="true"] .dark .liquid-glass,
 .dark [data-low-spec="true"] .liquid-glass {
-  background: rgba(15, 23, 42, 0.98) !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+  background: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
 }
 
 [data-low-spec="true"] .liquid-glass-card {
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04) !important;
-  transform: translateZ(0);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+  transition: none !important;
 }
 
 .dark[data-low-spec="true"] .liquid-glass-card,
 [data-low-spec="true"] .dark .liquid-glass-card,
 .dark [data-low-spec="true"] .liquid-glass-card {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
-  transform: translateZ(0);
+  box-shadow: none !important;
+  transition: none !important;
 }
 
 [data-low-spec="true"] .liquid-glass-pill {
-  background: rgba(248, 250, 252, 0.98) !important;
+  background: #f8fafc !important;
+  box-shadow: none !important;
 }
 
 .dark[data-low-spec="true"] .liquid-glass-pill,
 [data-low-spec="true"] .dark .liquid-glass-pill,
 .dark [data-low-spec="true"] .liquid-glass-pill {
-  background: rgba(30, 41, 59, 0.98) !important;
+  background: #1e293b !important;
+  box-shadow: none !important;
 }
 
-/* Optimize scrolling on budget phones and tablets */
-main, .inventory-grid {
-  contain: paint;
+/* Hardware-accelerated layer promotion ONLY for fixed/sticky navigation bars */
+header, nav {
+  transform: translateZ(0);
+  will-change: transform;
 }
 
-/* Content visibility auto for cards to skip offscreen DOM layout */
+/* Content visibility auto for offscreen cards so browser skips offscreen layout & paint */
 .item-card-container {
   content-visibility: auto;
-  contain-intrinsic-size: 0 170px;
+  contain-intrinsic-size: auto 176px;
 }
 
 /* Fix html2canvas FontMetrics baseline calculation with Tailwind CSS.
@@ -336,4 +350,5 @@ main, .inventory-grid {
 img[src^="data:image"] {
   display: inline !important;
 }
+
 
