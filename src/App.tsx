@@ -39,8 +39,8 @@ import { GeoConfig, getSavedGeoConfig, saveGeoConfig, subscribeGeoConfig, getSav
 import { GeoRestrictionModal } from './components/GeoRestrictionModal';
 import { TransactionSuccessModal, TransactionSuccessData } from './components/TransactionSuccessModal';
 import { playSuccessSoundAndSpeak } from './utils/audioUtils';
-import { notifyStockTransaction, notifyBulkStockTransaction, notifyAuthEvent, notifyPurchaseOrder } from './utils/lineNotify';
-import { triggerLowStockPush, triggerImportantRequisitionPush } from './utils/webPush';
+import { notifyPurchaseOrder } from './utils/lineNotify';
+import { triggerLowStockPush, triggerStockTransactionPush, triggerBulkRequisitionPush, triggerPurchaseOrderPush, syncExistingPushSubscription, triggerLocalPushDisplay, isDeviceWebPushEnabled } from './utils/webPush';
 import { LineSettingsModal } from './components/LineSettingsModal';
 import { FontSettingsModal } from './components/FontSettingsModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -309,7 +309,7 @@ export default function App() {
   const [requisitionToEdit, setRequisitionToEdit] = useState<RequisitionRecord | null>(null);
   const [isEditRequisitionModalOpen, setIsEditRequisitionModalOpen] = useState(false);
   const [isLineSettingsModalOpen, setIsLineSettingsModalOpen] = useState(false);
-  const [lineSettingsInitialTab, setLineSettingsInitialTab] = useState<'webpush' | 'line'>('line');
+  const [lineSettingsInitialTab, setLineSettingsInitialTab] = useState<'webpush' | 'line'>('webpush');
   const [transactionSuccess, setTransactionSuccess] = useState<TransactionSuccessData | null>(null);
 
   // App typography font selection state (IBM Plex Sans Thai / Prompt / Kanit / Chakra Petch / Mitr / Sarabun)
@@ -714,6 +714,95 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser?.id, currentUser?.sessionToken, currentUser?.role]);
 
+  // Auto-sync Web Push subscription & listen for incoming Web Push notifications (SW + Real-Time Firestore Relay)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const bootTime = Date.now();
+    const seenPushIds = new Set<string>();
+
+    // Silently verify & re-sync VAPID subscription if permission is granted
+    syncExistingPushSubscription(currentUser).catch(() => {});
+
+    const handleIncomingPush = (payload: {
+      id?: string;
+      title?: string;
+      body?: string;
+      tag?: string;
+      notificationType?: string;
+      type?: string;
+      timestamp?: number;
+    }, fromRealtimeRelay = false) => {
+      if (!payload || !payload.title) return;
+      const dedupeKey = payload.id || payload.tag || `${payload.title}:${payload.body}`;
+      if (seenPushIds.has(dedupeKey)) return;
+      seenPushIds.add(dedupeKey);
+      setTimeout(() => seenPushIds.delete(dedupeKey), 8000);
+
+      // Show prominent in-app toast notification
+      addToast({
+        type: payload.notificationType === 'low_stock' || payload.type === 'low_stock' ? 'warning' : 'info',
+        title: payload.title,
+        message: payload.body || '',
+      });
+
+      // If received via Firestore real-time relay while tab is hidden or if SW push hasn't fired, trigger OS notification
+      if (fromRealtimeRelay && (isDeviceWebPushEnabled() || Notification.permission === 'granted')) {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+          triggerLocalPushDisplay({
+            title: payload.title,
+            body: payload.body || '',
+            tag: payload.tag || dedupeKey,
+            showOsNotification: true,
+          }).catch(() => {});
+        }
+      }
+    };
+
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'WEB_PUSH_RECEIVED' && event.data.payload) {
+        handleIncomingPush(event.data.payload, false);
+      }
+    };
+
+    const onCustomPush = (event: Event) => {
+      const customEvt = event as CustomEvent;
+      if (customEvt.detail) {
+        handleIncomingPush(customEvt.detail, false);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', onSwMessage);
+    }
+    window.addEventListener('eng-webpush-received', onCustomPush);
+
+    let unsubPushRelay = () => {};
+    try {
+      if (db) {
+        unsubPushRelay = onSnapshot(
+          doc(db, 'settings', 'last_webpush_event'),
+          (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.data() as any;
+            if (data && data.timestamp && data.timestamp >= bootTime - 1500) {
+              handleIncomingPush(data, true);
+            }
+          },
+          () => {}
+        );
+      }
+    } catch (_) {}
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', onSwMessage);
+      }
+      window.removeEventListener('eng-webpush-received', onCustomPush);
+      unsubPushRelay();
+    };
+  }, [currentUser?.id]);
+
   // Sync favorites when currentUser changes
   useEffect(() => {
     try {
@@ -834,46 +923,20 @@ export default function App() {
           setDoc(doc(db, 'inventory', updatedItem.id), updatedItem)
         ]).catch(err => console.error("Background Firestore sync error:", err));
 
-        // 4. Send Real-time LINE Notification (Non-blocking background trigger)
-        notifyStockTransaction({
+        // 4. Send Real-time Web Push Notifications (Primary Notification System)
+        triggerStockTransactionPush({
           type: recordData.type,
           itemId: updatedItem.id,
           itemName: updatedItem.name,
-          category: updatedItem.category,
           qty: recordData.qty,
           unit: updatedItem.unit,
-          location: updatedItem.location,
           requestedBy: recordData.requestedBy,
           purpose: recordData.purpose,
-          note: recordData.note,
-          previousQty: currentItem.qty,
-          newQty: newQty,
-          status: newStatus,
-          timestamp: newRecord.timestamp,
-        }).catch(err => console.warn("LINE stock notification notice:", err));
+          newQty,
+        }).catch(err => console.warn("Web Push transaction warning:", err));
 
-        // 5. Send Web Push Notifications (Low stock alert or Important Requisition alert)
         if (newQty <= (updatedItem.minStock || 5) || newStatus === 'low' || newStatus === 'out') {
           triggerLowStockPush(updatedItem, newQty).catch(err => console.warn("Web Push low stock warning:", err));
-        }
-        if (recordData.type === 'out') {
-          const isImportant = recordData.qty >= 5 || (recordData.purpose && (
-            recordData.purpose.includes('ด่วน') || 
-            recordData.purpose.includes('สำคัญ') || 
-            recordData.purpose.includes('ฉุกเฉิน') || 
-            recordData.purpose.includes('เครื่อง') || 
-            recordData.purpose.includes('ระบบ')
-          ));
-          triggerImportantRequisitionPush({
-            itemId: updatedItem.id,
-            itemName: updatedItem.name,
-            qty: recordData.qty,
-            unit: updatedItem.unit,
-            requestedBy: recordData.requestedBy,
-            purpose: recordData.purpose,
-            newQty,
-            isImportant: Boolean(isImportant),
-          }).catch(err => console.warn("Web Push requisition warning:", err));
         }
       } else {
         setDoc(doc(db, 'requisitions', newRecord.id), newRecord).catch(console.error);
@@ -1088,12 +1151,20 @@ export default function App() {
       // 3. Update local state for 0ms response
       setOrders(prev => [newOrder, ...prev.filter(o => o.id !== newOrder.id)]);
 
-      // 4. Send interactive notification to LINE (with One-Click Confirm button)
+      // 4. Send interactive Purchase Order notification to LINE + Web Push Notification
       try {
         await notifyPurchaseOrder(newOrder);
       } catch (lineErr) {
         console.warn("LINE notification error:", lineErr);
       }
+      triggerPurchaseOrderPush({
+        id: newOrder.id,
+        itemName: newOrder.itemName,
+        qty: newOrder.qty,
+        unit: newOrder.unit,
+        requestedBy: newOrder.requestedBy,
+        urgency: newOrder.urgency,
+      }).catch(err => console.warn("Web Push order notification notice:", err));
 
       // 5. Sound & User Feedback
       playSuccessSoundAndSpeak(`บันทึกคำสั่งซื้อ ${newOrder.itemName} เรียบร้อยแล้ว`);
@@ -1857,36 +1928,19 @@ export default function App() {
 
         setDoc(doc(db, 'inventory', cleanItem.id), cleanItem).catch(err => console.error("Failed to update inventory", err));
 
-        // Send LINE notification for AI-assisted stock actions
+        // Send Web Push notification for AI-assisted stock actions (Primary Notification System)
         if (action.record) {
-          notifyStockTransaction({
+          triggerStockTransactionPush({
             type: isStockIn ? 'in' : 'out',
             itemId: cleanItem.id,
             itemName: cleanItem.name,
-            category: cleanItem.category,
             qty: action.record.qty,
             unit: cleanItem.unit,
-            location: cleanItem.location,
             requestedBy: action.record.requestedBy,
             purpose: action.record.purpose,
-            previousQty: oldItem?.qty,
             newQty: cleanItem.qty,
-            status: cleanItem.status,
-            timestamp: action.record.timestamp,
-          }).catch(err => console.warn("LINE notification error from AI action:", err));
+          }).catch(err => console.warn("Web Push AI transaction notice:", err));
 
-          // Web Push notification for AI-assisted stock actions
-          if (action.record.type === 'out') {
-            triggerImportantRequisitionPush({
-              itemId: cleanItem.id,
-              itemName: cleanItem.name,
-              qty: action.record.qty,
-              unit: cleanItem.unit,
-              requestedBy: action.record.requestedBy,
-              purpose: action.record.purpose,
-              newQty: cleanItem.qty,
-            }).catch(err => console.warn("Web Push AI requisition notice:", err));
-          }
           if (cleanItem.qty <= (cleanItem.minStock || 5) || cleanItem.status === 'low' || cleanItem.status === 'out') {
             triggerLowStockPush(cleanItem, cleanItem.qty).catch(err => console.warn("Web Push AI low stock notice:", err));
           }
@@ -2299,8 +2353,9 @@ export default function App() {
     }
     Promise.all(firestorePromises).catch((err) => console.error("Firestore sync error:", err));
 
-    // Send LINE Notification asynchronously
-    notifyBulkStockTransaction({
+    // Send Web Push Notification asynchronously (Primary Notification System)
+    triggerBulkRequisitionPush({
+      type: 'out',
       items: bulkItemsForSuccess.map(i => ({
         itemId: i.id,
         itemName: i.name,
@@ -2310,9 +2365,7 @@ export default function App() {
       })),
       requestedBy: data.requestedBy,
       purpose: data.purpose,
-      note: data.note,
-      timestamp: timestampStr,
-    }).catch((err) => console.warn("LINE bulk notification notice:", err));
+    }).catch((err) => console.warn("Web push bulk notification notice:", err));
 
     // Web Push alerts for low stock items
     updatedItemsMap.forEach((uItem) => {
@@ -2490,17 +2543,6 @@ export default function App() {
     } catch (err) {
       console.warn('Logout session clear error:', err);
     } finally {
-      if (loggedOutUser) {
-        notifyAuthEvent({
-          type: 'logout',
-          userId: loggedOutUser.id,
-          username: loggedOutUser.username,
-          name: loggedOutUser.name,
-          nickname: loggedOutUser.nickname,
-          role: loggedOutUser.role,
-        }).catch(err => console.warn("LINE logout notification notice:", err));
-      }
-
       localStorage.removeItem('warehouse_user');
       setChatHistory([]);
       setCurrentUser(null);
@@ -2513,71 +2555,52 @@ export default function App() {
     const handleLogin = (user: User) => {
       setChatHistory([]);
       setCurrentUser(user);
-      // Send real-time LINE login notification
-      notifyAuthEvent({
-        type: 'login',
-        userId: user.id,
-        username: user.username,
-        name: user.name,
-        nickname: user.nickname,
-        role: user.role,
-      }).catch(err => console.warn("LINE login notification notice:", err));
     };
     return <LoginView onLogin={handleLogin} />;
   }
 
-  const normalStockCount = Math.max(
-    0,
-    items.length - (summary?.lowStockCount || 0) - (summary?.outOfStockCount || 0)
-  );
-
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-100 dark:bg-slate-950 flex justify-center pl-safe pr-safe selection:bg-blue-600 selection:text-white relative overflow-x-hidden w-full max-w-full transition-colors duration-200">
+    <div className="min-h-screen min-h-[100dvh] bg-slate-900 flex justify-center pl-safe pr-safe selection:bg-blue-500 selection:text-white relative overflow-x-hidden w-full max-w-full">
+      {/* Ambient Light Glows: Only render on high-spec desktop where outer margins are visible */}
+      {!deviceInfo.isLowSpec && deviceInfo.isDesktop && (
+        <>
+          <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-blue-500/10 dark:bg-blue-600/15 rounded-full blur-[130px] pointer-events-none -z-0" />
+          <div className="fixed top-1/3 right-1/4 w-[450px] h-[450px] bg-indigo-500/10 dark:bg-indigo-600/12 rounded-full blur-[140px] pointer-events-none -z-0" />
+          <div className="fixed bottom-10 left-1/3 w-[400px] h-[400px] bg-teal-500/8 dark:bg-teal-600/10 rounded-full blur-[120px] pointer-events-none -z-0" />
+        </>
+      )}
+
       {/* Global sleek loading progress bar */}
       <GlobalProgressBar isLoading={refreshing || loading} triggerKey={activeTab} />
 
-      {/* Industrial Command Pro Responsive Shell */}
+      {/* Auto-scaling Responsive Shell: Phone, Tablet, PC */}
       <div 
-        className={`w-full max-w-full min-w-0 lg:max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] bg-[#F8FAFC] dark:bg-[#090D16] flex flex-col relative font-sans md:border-x border-slate-200 dark:border-slate-800/90 overflow-x-hidden ${
+        className={`w-full max-w-full min-w-0 lg:max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] bg-[#F8FAFC] dark:bg-slate-950 flex flex-col shadow-2xl relative font-sans md:border-x border-white/40 dark:border-slate-800/80 overflow-x-hidden ${
           activeTab === 'voice' 
             ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' 
             : 'min-h-screen min-h-[100dvh]'
         }`}
       >
-        {/* Top Industrial Command Header */}
-        <header className="bg-white dark:bg-slate-900 sticky top-0 z-30 px-3 sm:px-5 md:px-6 pt-safe-header pb-2.5 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200">
+        
+        {/* Universal Sticky Top Header: Solid opaque background to prevent any blurry bleed-through on mobile/iOS */}
+        <header className="bg-white dark:bg-slate-900 sticky top-0 z-30 px-3 sm:px-5 md:px-6 pt-safe-header pb-2.5 shadow-xs border-b border-slate-200/90 dark:border-slate-800 transition-colors duration-200">
           <div className="max-w-7xl mx-auto w-full">
             <div className="flex items-center justify-between gap-2 sm:gap-3">
-              {/* Brand Logo & User Identity (Left) */}
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-950 shrink-0 shadow-2xs">
-                  <EngLogo className="w-full h-full object-cover" />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-mono font-extrabold tracking-wider text-blue-600 dark:text-blue-400 uppercase hidden sm:inline">
-                      ENG SMART STORE
-                    </span>
-                    <span
-                      className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border uppercase tracking-tight ${
-                        currentUser.role === 'admin'
-                          ? 'bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800/70'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      {currentUser.role === 'admin' ? 'ADMIN' : 'STAFF'}
-                    </span>
+              {/* User Info Badge (Left) */}
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 liquid-glass-pill px-2.5 sm:px-3 py-1 rounded-2xl shadow-2xs min-w-0 border border-white/70 dark:border-white/10" title={currentUser.name}>
+                  <div className="w-5 h-5 rounded-full bg-blue-500/20 dark:bg-blue-400/20 border border-blue-400/30 flex items-center justify-center shrink-0 shadow-xs">
+                    <UserIcon className="w-3 h-3 text-blue-600 dark:text-blue-400" />
                   </div>
-                  <div className="flex items-center gap-1 min-w-0" title={currentUser.name}>
-                    <UserIcon className="w-3 h-3 text-slate-400 dark:text-slate-500 shrink-0" />
-                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate max-w-[115px] sm:max-w-[180px]">
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate leading-tight max-w-[130px] sm:max-w-[180px]">
                       {currentUser.name || currentUser.username}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Segmented Command Tabs on Desktop (xl) */}
+              {/* Automatic Mode Tabs: Shown at top on large screens (xl), hidden on mobile/tablet/preview */}
               <TopNavTabs
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
@@ -2589,83 +2612,92 @@ export default function App() {
                 className="hidden xl:flex"
               />
 
-              {/* Header Command Actions (Right) */}
+              {/* Header Action Buttons (Right) */}
               <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                {/* Light/Dark Theme Switcher */}
+                {/* Dark Mode Toggle */}
                 <ThemeToggle />
 
                 {/* PWA In-App Install Prompt */}
                 <PWAInstallButton />
 
+                {/* Logout Button */}
+                <button
+                  onClick={() => setShowLogoutConfirm(true)}
+                  className="p-2 sm:p-2.5 rounded-2xl text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 active:scale-95 transition-all flex items-center liquid-glass-pill cursor-pointer shadow-2xs border border-white/60 dark:border-white/10"
+                  title="ออกจากระบบ"
+                >
+                  <LogOut className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                </button>
+
                 {/* Refresh / Sync Button */}
                 <button
                   onClick={() => fetchInventory(true)}
                   disabled={refreshing}
-                  className="h-9 w-9 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-700 active:scale-95 transition-colors flex items-center justify-center cursor-pointer"
+                  className="p-2 sm:p-2.5 rounded-2xl text-slate-700 dark:text-slate-200 hover:bg-white/80 dark:hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-1 liquid-glass-pill cursor-pointer shadow-2xs border border-white/60 dark:border-white/10"
                   title="ซิงค์ข้อมูลล่าสุด"
                 >
-                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-blue-600 dark:text-blue-400' : ''}`} />
+                  <RefreshCw className={`w-4 h-4 sm:w-4.5 sm:h-4.5 ${refreshing ? 'animate-spin text-blue-600 dark:text-blue-400' : ''}`} />
                 </button>
 
-                {/* Notification Settings (Web Push & LINE Bot for Admin only) */}
-                {currentUser.role === 'admin' && (
-                  <button
-                    onClick={() => {
-                      setLineSettingsInitialTab('line');
-                      setIsLineSettingsModalOpen(true);
-                    }}
-                    className="h-9 w-9 rounded-lg text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800/70 active:scale-95 transition-colors flex items-center justify-center cursor-pointer"
-                    title="การแจ้งเตือน (Web Push & LINE)"
-                  >
-                    <Bell className="w-4 h-4" />
-                  </button>
-                )}
+                {/* Notification Settings (Web Push Primary for all users & LINE PO Bot) */}
+                <button
+                  onClick={() => {
+                    setLineSettingsInitialTab('webpush');
+                    setIsLineSettingsModalOpen(true);
+                  }}
+                  className="p-2 sm:p-2.5 rounded-2xl text-blue-700 dark:text-blue-300 hover:bg-blue-500/15 active:scale-95 transition-all flex items-center border border-blue-400/30 bg-blue-500/10 dark:bg-blue-400/10 cursor-pointer shadow-2xs backdrop-blur-md"
+                  title="การแจ้งเตือน (Web Push Notification & LINE สั่งของ)"
+                >
+                  <Bell className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-blue-600 dark:text-blue-400" />
+                </button>
 
                 {/* Add Item (Admin) */}
                 {currentUser.role === 'admin' && (
                   <button
                     onClick={handleOpenAddItemModal}
-                    className="h-9 px-2.5 sm:px-3 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white active:scale-95 transition-colors text-xs font-bold flex items-center gap-1 border border-slate-800 dark:border-slate-700 cursor-pointer"
+                    className="p-2 sm:p-2.5 px-2.5 sm:px-3 rounded-2xl bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 dark:from-slate-700 dark:to-slate-850 text-white active:scale-95 transition-all text-xs sm:text-sm font-bold flex items-center gap-1 border border-white/15 shadow-sm cursor-pointer relative overflow-hidden"
                     title="เพิ่มสินค้าใหม่ (Admin)"
                   >
+                    <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
                     <Plus className="w-4 h-4" />
-                    <span className="hidden sm:inline">เพิ่มอะไหล่</span>
+                    <span className="hidden sm:inline">เพิ่มสินค้า</span>
                   </button>
                 )}
 
-                {/* Requisition Split Button (เบิกของ) */}
-                <div className="relative flex items-center rounded-lg" ref={requisitionMenuRef}>
+                {/* Requisition Button with Dropdown (โหมดเบิกของ) */}
+                <div className="relative flex items-center shadow-md shadow-blue-500/25 rounded-2xl" ref={requisitionMenuRef}>
                   <button
                     onClick={() => {
                       setIsRequisitionMenuOpen(false);
                       handleOpenRequisitionModal();
                     }}
-                    className="h-9 px-2.5 sm:px-3 rounded-l-lg bg-blue-600 hover:bg-blue-700 text-white active:scale-95 transition-colors text-xs font-bold flex items-center gap-1.5 border border-blue-600 cursor-pointer"
-                    title="บันทึกการเบิกของ / รับเข้าสต๊อก"
+                    className="p-2 sm:p-2.5 px-3 sm:px-3.5 rounded-l-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white active:scale-95 transition-all text-xs sm:text-sm font-bold flex items-center gap-1.5 border-t border-b border-l border-blue-400/40 cursor-pointer relative overflow-hidden"
+                    title="บันทึกการเบิกของ"
                   >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span>เบิกของ</span>
+                    <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent pointer-events-none" />
+                    <ClipboardList className="w-4 h-4 relative z-10" />
+                    <span className="relative z-10">เบิกของ</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setIsRequisitionMenuOpen((prev) => !prev)}
-                    className="h-9 px-1.5 rounded-r-lg bg-blue-700 hover:bg-blue-800 text-white active:scale-95 transition-colors border-y border-r border-blue-700 border-l border-l-blue-500 cursor-pointer flex items-center justify-center"
+                    className="p-2 sm:p-2.5 px-2 rounded-r-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white active:scale-95 transition-all border-t border-b border-r border-blue-400/40 border-l border-l-blue-400/30 cursor-pointer relative"
                     title="ตัวเลือกโหมดเบิกของ (เบิก 1 ชิ้น หรือ เลือกหลายชิ้น)"
                   >
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isRequisitionMenuOpen ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isRequisitionMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
 
-                  {/* Dropdown Options for Requisition Mode */}
+                  {/* Dropdown Options for Requisition Mode with Smooth Spring & Liquid Glass Animation */}
                   <AnimatePresence>
                     {isRequisitionMenuOpen && (
                       <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                        initial={{ opacity: 0, scale: 0.9, y: -6 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                        transition={{ duration: 0.15 }}
+                        exit={{ opacity: 0, scale: 0.92, y: -4 }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 380, mass: 0.8 }}
                         style={{ transformOrigin: 'top right' }}
-                        className="absolute right-0 top-full mt-1.5 w-60 rounded-xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 p-1.5 z-50 overflow-hidden"
+                        className="absolute right-0 top-full mt-2 w-60 rounded-2xl backdrop-blur-2xl bg-white/95 dark:bg-slate-900/90 shadow-2xl shadow-indigo-500/10 dark:shadow-black/60 border border-slate-200/80 dark:border-white/10 p-1.5 z-50 overflow-hidden"
                       >
                         <button
                           type="button"
@@ -2673,18 +2705,18 @@ export default function App() {
                             setIsRequisitionMenuOpen(false);
                             handleOpenRequisitionModal();
                           }}
-                          className="group w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+                          className="group w-full px-3.5 py-2.5 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer"
                         >
-                          <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/70 flex items-center justify-center shrink-0">
-                            <ClipboardList className="w-3.5 h-3.5" />
+                          <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                            <ClipboardList className="w-4 h-4" />
                           </div>
                           <div>
-                            <div className="font-bold text-slate-900 dark:text-white">เบิก/รับทั่วไป (1 รายการ)</div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400">เปิดหน้าต่างบันทึกการเบิกหรือรับเข้า</div>
+                            <div className="font-bold text-slate-900 dark:text-white">เบิกทั่วไป (1 รายการ)</div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">เปิดหน้าต่างบันทึกการเบิก</div>
                           </div>
                         </button>
 
-                        <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                        <div className="my-1 border-t border-slate-100/80 dark:border-slate-800/80" />
 
                         <button
                           type="button"
@@ -2692,29 +2724,20 @@ export default function App() {
                             setIsRequisitionMenuOpen(false);
                             handleStartMultiSelect();
                           }}
-                          className="group w-full px-3 py-2 text-left text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+                          className="group w-full px-3.5 py-2.5 text-left text-xs sm:text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50/80 dark:hover:bg-blue-950/40 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer"
                         >
-                          <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
-                            <CheckSquare className="w-3.5 h-3.5" />
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                            <CheckSquare className="w-4 h-4" />
                           </div>
                           <div>
                             <div className="font-bold text-blue-600 dark:text-blue-400">เลือกหลายชิ้น (เบิกเป็นชุด)</div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400">ติ๊กเลือกหลายรายการเพื่อตัดยอดพร้อมกัน</div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">ติ๊กเลือกหลายรายการเพื่อตัดยอดพร้อมกัน</div>
                           </div>
                         </button>
                       </motion.div>
                     )}
                   </AnimatePresence>
                 </div>
-
-                {/* Logout Button */}
-                <button
-                  onClick={() => setShowLogoutConfirm(true)}
-                  className="h-9 w-9 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:border-red-200 dark:hover:border-red-800/60 active:scale-95 transition-colors flex items-center justify-center cursor-pointer"
-                  title="ออกจากระบบ"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
               </div>
             </div>
           </div>
@@ -2731,178 +2754,116 @@ export default function App() {
               transition={{ duration: deviceInfo.isLowSpec ? 0 : 0.14 }}
               className="flex-1 flex flex-col pb-28 sm:pb-32 w-full min-w-0 overflow-x-hidden"
             >
-              {/* Industrial Command Pro Search, Bento KPI Strip & Filter Bar */}
-              <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3 sm:px-5 md:px-6 py-3 w-full min-w-0">
-                <div className="max-w-7xl mx-auto w-full min-w-0 space-y-2.5">
-                  {/* Bento KPI Command Strip (Click to filter directly) */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {/* Search & Filter Bar */}
+              <div className="bg-white/95 dark:bg-slate-900/95 border-b border-slate-200/80 dark:border-slate-800 px-3.5 sm:px-5 md:px-6 py-2.5 shadow-2xs transition-all duration-200 w-full min-w-0 overflow-hidden">
+                <div className="max-w-7xl mx-auto w-full min-w-0">
+                  {/* Search Bar */}
+                  <div className="relative mb-2.5">
+                    <Search className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 dark:text-slate-400 absolute left-3.5 top-2.5 sm:top-3" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="ค้นหาชื่อสินค้า, รหัส, หมวดหมู่, ตำแหน่ง..."
+                      className="w-full liquid-glass-input rounded-2xl pl-10 pr-10 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all shadow-inner"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 top-2.5 sm:top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        <X className="w-4 h-4 sm:w-5 sm:h-5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Status Filter Chips */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs sm:text-sm">
                     <button
-                      type="button"
                       onClick={() => setStatusFilter('all')}
-                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                      className={`px-3 sm:px-3.5 py-1.5 rounded-full font-bold shrink-0 transition-all shadow-2xs cursor-pointer ${
                         statusFilter === 'all'
-                          ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-600 dark:border-blue-500 ring-1 ring-blue-500/20'
-                          : 'bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 border border-blue-400/40'
+                          : 'liquid-glass-pill text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-800'
                       }`}
                     >
-                      <div>
-                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">รายการอะไหล่ทั้งหมด</div>
-                        <div className="font-mono font-black text-lg sm:text-xl text-slate-900 dark:text-white tabular-nums leading-tight mt-0.5">
-                          {items.length.toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                        <Package className="w-4 h-4" />
-                      </div>
+                      ทั้งหมด ({items.length})
                     </button>
-
+                    {/* Favorite items filter button */}
                     <button
-                      type="button"
-                      onClick={() => setStatusFilter('all')}
-                      className="p-2.5 rounded-xl border bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 hover:border-emerald-400 dark:hover:border-emerald-700 text-left transition-all cursor-pointer flex items-center justify-between"
+                      onClick={() => setStatusFilter(statusFilter === 'favorites' ? 'all' : 'favorites')}
+                      className={`px-3 sm:px-3.5 py-1.5 rounded-full font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
+                        statusFilter === 'favorites'
+                          ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 border border-amber-300/40'
+                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-400/30 hover:bg-amber-500/25 backdrop-blur-md'
+                      }`}
+                      title="แสดงเฉพาะรายการสินค้าที่ปักหมุดไว้"
                     >
-                      <div>
-                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">พร้อมเบิกใช้งาน</div>
-                        <div className="font-mono font-black text-lg sm:text-xl text-emerald-600 dark:text-emerald-400 tabular-nums leading-tight mt-0.5">
-                          {normalStockCount.toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                        <CheckCircle2 className="w-4 h-4" />
-                      </div>
+                      <Star className={`w-3.5 h-3.5 ${statusFilter === 'favorites' ? 'fill-white text-white' : 'fill-amber-500 text-amber-500'}`} />
+                      <span>รายการโปรด ({favoriteItemIds.size})</span>
                     </button>
-
                     <button
-                      type="button"
-                      onClick={() => setStatusFilter(statusFilter === 'low' ? 'all' : 'low')}
-                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                      onClick={() => setStatusFilter('low')}
+                      className={`px-3 sm:px-3.5 py-1.5 rounded-full font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
                         statusFilter === 'low'
-                          ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-500 ring-1 ring-amber-500/25'
-                          : 'bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-700'
+                          ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 border border-amber-300/40'
+                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-400/30 hover:bg-amber-500/25 backdrop-blur-md'
                       }`}
                     >
-                      <div>
-                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">สต๊อกใกล้หมด</div>
-                        <div className="font-mono font-black text-lg sm:text-xl text-amber-600 dark:text-amber-400 tabular-nums leading-tight mt-0.5">
-                          {(summary?.lowStockCount || 0).toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                        <AlertTriangle className="w-4 h-4" />
-                      </div>
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                      ใกล้หมด ({summary?.lowStockCount || 0})
                     </button>
-
                     <button
-                      type="button"
-                      onClick={() => setStatusFilter(statusFilter === 'out' ? 'all' : 'out')}
-                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                      onClick={() => setStatusFilter('out')}
+                      className={`px-3 sm:px-3.5 py-1.5 rounded-full font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
                         statusFilter === 'out'
-                          ? 'bg-red-50 dark:bg-red-950/50 border-red-500 ring-1 ring-red-500/25'
-                          : 'bg-slate-50/80 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 hover:border-red-400 dark:hover:border-red-700'
+                          ? 'bg-red-600 text-white shadow-md shadow-red-500/25 border border-red-400/40'
+                          : 'bg-red-500/15 text-red-800 dark:text-red-300 border border-red-400/30 hover:bg-red-500/25 backdrop-blur-md'
                       }`}
                     >
-                      <div>
-                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">สินค้าหมดสต๊อก</div>
-                        <div className="font-mono font-black text-lg sm:text-xl text-red-600 dark:text-red-400 tabular-nums leading-tight mt-0.5">
-                          {(summary?.outOfStockCount || 0).toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
-                        <XCircle className="w-4 h-4" />
-                      </div>
+                      <XCircle className="w-3.5 h-3.5 text-red-500" />
+                      หมดสต็อก ({summary?.outOfStockCount || 0})
                     </button>
-                  </div>
 
-                  {/* Search Input & Quick Status Toolbar */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <div className="relative flex-1">
-                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="ค้นหาชื่ออะไหล่, รหัสสินค้า (#A000...), หมวดหมู่, สถานที่จัดเก็บ..."
-                        className="w-full h-10 bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-lg pl-9 pr-9 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 dark:focus:border-blue-500 transition-all"
-                      />
-                      {searchQuery && (
-                        <button
-                          onClick={() => setSearchQuery('')}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Quick Filter & Admin Batch Actions */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+                    {/* Admin Batch Update Quick Button */}
+                    {currentUser?.role === 'admin' && (
                       <button
                         type="button"
-                        onClick={() => setStatusFilter(statusFilter === 'favorites' ? 'all' : 'favorites')}
-                        className={`h-9 px-3 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 border transition-colors cursor-pointer ${
-                          statusFilter === 'favorites'
-                            ? 'bg-amber-500 text-white border-amber-500'
-                            : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40'
-                        }`}
-                        title="แสดงเฉพาะรายการสินค้าที่ปักหมุดไว้"
+                        onClick={() => {
+                          if (!isMultiSelectMode) {
+                            setIsMultiSelectMode(true);
+                          }
+                          setIsBatchUpdateModalOpen(true);
+                        }}
+                        className="ml-auto px-3 sm:px-3.5 py-1.5 rounded-full font-bold shrink-0 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer bg-purple-500/15 text-purple-800 dark:text-purple-300 border border-purple-400/30 hover:bg-purple-500/25 active:scale-95"
+                        title="เปิดระบบแก้ไขข้อมูลสินค้าแบบกลุ่ม (Batch Update)"
                       >
-                        <Star className={`w-3.5 h-3.5 ${statusFilter === 'favorites' ? 'fill-white text-white' : 'fill-amber-400 text-amber-500'}`} />
-                        <span>ปักหมุด ({favoriteItemIds.size})</span>
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                        <span>แก้ไขแบบกลุ่ม (Batch)</span>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={handleToggleMultiSelectMode}
-                        className={`h-9 px-3 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 border transition-colors cursor-pointer ${
-                          isMultiSelectMode
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
-                        }`}
-                        title="เลือกเบิกหลายรายการพร้อมกัน"
-                      >
-                        <CheckSquare className="w-3.5 h-3.5" />
-                        <span>เลือกหลายชิ้น</span>
-                      </button>
-
-                      {currentUser?.role === 'admin' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isMultiSelectMode) {
-                              setIsMultiSelectMode(true);
-                            }
-                            setIsBatchUpdateModalOpen(true);
-                          }}
-                          className="h-9 px-3 rounded-lg text-xs font-bold shrink-0 flex items-center gap-1.5 border bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-blue-500 transition-colors cursor-pointer"
-                          title="เปิดระบบแก้ไขข้อมูลสินค้าแบบกลุ่ม (Batch Update)"
-                        >
-                          <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                          <span>แก้ไขกลุ่ม</span>
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
 
-                  {/* Category Segmented Bar */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5 text-xs">
+                  {/* Category Horizontal Filter Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1.5 text-xs sm:text-sm">
                     <button
                       onClick={() => setSelectedCategory('ทั้งหมด')}
-                      className={`px-3 py-1.5 rounded-lg shrink-0 transition-colors cursor-pointer font-bold border ${
+                      className={`px-3 sm:px-3.5 py-1 rounded-full shrink-0 transition-all shadow-2xs cursor-pointer font-medium ${
                         selectedCategory === 'ทั้งหมด'
-                          ? 'bg-slate-900 dark:bg-blue-600 text-white border-slate-900 dark:border-blue-600'
-                          : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-500/25 border border-blue-400/40'
+                          : 'liquid-glass-pill text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'
                       }`}
                     >
-                      ทุกหมวดหมู่
+                      ทุกหมวด
                     </button>
                     {categoryList.map((cat) => (
                       <button
                         key={cat}
                         onClick={() => setSelectedCategory(cat)}
-                        className={`px-3 py-1.5 rounded-lg shrink-0 transition-colors cursor-pointer font-semibold border ${
+                        className={`px-3 sm:px-3.5 py-1 rounded-full shrink-0 transition-all shadow-2xs cursor-pointer font-medium ${
                           selectedCategory === cat
-                            ? 'bg-slate-900 dark:bg-blue-600 text-white border-slate-900 dark:border-blue-600 font-bold'
-                            : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-500/25 border border-blue-400/40'
+                            : 'liquid-glass-pill text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'
                         }`}
                       >
                         {cat}
@@ -2914,15 +2875,18 @@ export default function App() {
 
               {/* Multi-Select Active Action Bar */}
               {isMultiSelectMode && (
-                <div className="sticky top-[calc(env(safe-area-inset-top,0px)+52px)] z-25 px-3.5 sm:px-5 md:px-6 py-2 bg-blue-600 text-white shadow-md border-b border-blue-500">
+                <div className="sticky top-[calc(env(safe-area-inset-top,0px)+52px)] z-25 px-3.5 sm:px-5 md:px-6 py-2 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 text-white shadow-lg border-b border-blue-400/30">
                   <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
                     <div className="flex items-center gap-2 sm:gap-3">
-                      <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center font-mono font-black text-xs text-white tabular-nums">
+                      <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center font-black text-sm text-white">
                         {selectedItemIds.size}
                       </div>
                       <div>
-                        <div className="text-xs sm:text-sm font-bold leading-tight">
-                          เลือกแล้ว {selectedItemIds.size} จาก {filteredItems.length} รายการ
+                        <div className="text-xs sm:text-sm font-black leading-tight">
+                          เลือก {selectedItemIds.size} จาก {filteredItems.length} รายการ
+                        </div>
+                        <div className="text-[11px] text-blue-100 font-medium hidden sm:block">
+                          กดที่กล่องติ๊กเพื่อเลือกหลายรายการ แล้วกดปุ่มเบิกพร้อมกัน
                         </div>
                       </div>
                     </div>
@@ -2931,7 +2895,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={handleSelectAllFiltered}
-                        className="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-colors cursor-pointer"
+                        className="px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 active:scale-95 text-white text-xs font-bold transition-all cursor-pointer"
                       >
                         เลือกทั้งหมด ({filteredItems.length})
                       </button>
@@ -2940,7 +2904,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={handleClearSelection}
-                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors cursor-pointer"
+                          className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-xs font-semibold transition-all cursor-pointer"
                         >
                           ล้างที่เลือก
                         </button>
@@ -2949,24 +2913,26 @@ export default function App() {
                       <button
                         type="button"
                         onClick={handleToggleMultiSelectMode}
-                        className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors cursor-pointer"
+                        className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-xs font-semibold transition-all cursor-pointer"
                       >
                         ปิดโหมดเลือก
                       </button>
 
+                      {/* Admin Batch Update Modal Trigger */}
                       {currentUser?.role === 'admin' && (
                         <button
                           type="button"
                           onClick={() => setIsBatchUpdateModalOpen(true)}
                           disabled={selectedItemIds.size === 0}
-                          className={`px-3 py-1 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${
+                          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-md ${
                             selectedItemIds.size > 0
-                              ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 cursor-pointer'
+                              ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 active:scale-95 cursor-pointer shadow-amber-500/30'
                               : 'bg-white/20 text-white/50 cursor-not-allowed'
                           }`}
+                          title="แก้ไขสถานที่เก็บ หรือ Min Stock ของสินค้าที่เลือกพร้อมกัน"
                         >
-                          <SlidersHorizontal className="w-3.5 h-3.5 text-slate-950" />
-                          <span>แก้ไขพร้อมกัน ({selectedItemIds.size})</span>
+                          <SlidersHorizontal className="w-4 h-4 text-slate-950" />
+                          <span>แก้ไขพร้อมกัน (Batch Update) ({selectedItemIds.size})</span>
                         </button>
                       )}
 
@@ -2974,13 +2940,13 @@ export default function App() {
                         type="button"
                         onClick={handleOpenBulkModal}
                         disabled={selectedItemIds.size === 0}
-                        className={`px-3 py-1 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${
+                        className={`px-3.5 py-1.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-md ${
                           selectedItemIds.size > 0
-                            ? 'bg-white text-blue-700 hover:bg-blue-50 cursor-pointer'
+                            ? 'bg-white text-blue-700 hover:bg-blue-50 active:scale-95 cursor-pointer shadow-blue-900/30'
                             : 'bg-white/30 text-white/60 cursor-not-allowed'
                         }`}
                       >
-                        <ClipboardList className="w-3.5 h-3.5" />
+                        <ClipboardList className="w-4 h-4" />
                         <span>เบิกพร้อมกัน ({selectedItemIds.size})</span>
                       </button>
                     </div>
@@ -2989,64 +2955,56 @@ export default function App() {
               )}
 
               {/* Inventory List Body */}
-              <main className="p-3 sm:p-4 md:p-5 space-y-3 flex-1 max-w-7xl mx-auto w-full min-w-0 overflow-x-hidden">
+              <main className="p-3 sm:p-4.5 md:p-6 space-y-4 flex-1 max-w-7xl mx-auto w-full min-w-0 overflow-x-hidden">
                 {loading ? (
                   <InventorySkeleton count={6} />
                 ) : error ? (
-                  <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/80 text-red-700 dark:text-red-300 p-4 rounded-xl text-sm space-y-2">
+                  <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/80 text-red-700 dark:text-red-300 p-4 rounded-xl text-sm sm:text-base space-y-2">
                     <p className="font-bold">เกิดข้อผิดพลาดในการโหลดข้อมูล</p>
                     <p>{error}</p>
                     <button
                       onClick={() => fetchInventory(true)}
-                      className="px-3 py-1.5 bg-red-600 text-white rounded-lg font-semibold text-xs hover:bg-red-700 transition-colors cursor-pointer"
+                      className="px-3 py-1.5 bg-red-600 text-white rounded-lg font-semibold text-sm hover:bg-red-700 transition-colors cursor-pointer"
                     >
                       ลองใหม่อีกครั้ง
                     </button>
                   </div>
                 ) : filteredItems.length === 0 ? (
-                  <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500">
+                  <div className="text-center py-16 text-slate-400 dark:text-slate-500">
                     <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">ไม่พบรายการอะไหล่ที่ค้นหา</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">ลองเปลี่ยนคำค้นหาหรือตัวกรองหมวดหมู่ด้านบน</p>
+                    <p className="text-base font-semibold text-slate-600 dark:text-slate-300">ไม่พบรายการสินค้าที่ค้นหา</p>
+                    <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">ลองเปลี่ยนคำค้นหาหรือตัวกรองหมวดหมู่</p>
                     <button
                       onClick={() => {
                         setSearchQuery('');
                         setSelectedCategory('ทั้งหมด');
                         setStatusFilter('all');
                       }}
-                      className="mt-3 px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer"
+                      className="mt-3 text-sm text-blue-600 dark:text-blue-400 font-semibold underline cursor-pointer"
                     >
-                      แสดงอะไหล่ทั้งหมด
+                      ล้างการค้นหาทั้งหมด
                     </button>
                   </div>
                 ) : (
                   <div className="space-y-3 w-full min-w-0">
-                    {/* Active Filter Status Bar */}
-                    {(statusFilter !== 'all' || selectedCategory !== 'ทั้งหมด' || searchQuery) && (
-                      <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs">
-                        <div className="flex items-center gap-2 font-semibold text-slate-700 dark:text-slate-300">
-                          <span>พบ <strong className="font-mono font-bold text-blue-600 dark:text-blue-400 tabular-nums">{filteredItems.length}</strong> รายการ</span>
-                          {selectedCategory !== 'ทั้งหมด' && (
-                            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                              หมวด: {selectedCategory}
-                            </span>
-                          )}
+                    {/* Active favorites filter banner */}
+                    {statusFilter === 'favorites' && (
+                      <div className="flex items-center justify-between p-3 sm:p-3.5 rounded-2xl bg-amber-500/10 border-2 border-amber-400/50 text-amber-800 dark:text-amber-300 shadow-2xs">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-bold">
+                          <Star className="w-4 h-4 fill-amber-400 text-amber-400 shrink-0" />
+                          <span>แสดงเฉพาะรายการโปรดที่ปักหมุดไว้ ({filteredItems.length} รายการ)</span>
                         </div>
                         <button
                           type="button"
-                          onClick={() => {
-                            setSearchQuery('');
-                            setSelectedCategory('ทั้งหมด');
-                            setStatusFilter('all');
-                          }}
-                          className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                          onClick={() => setStatusFilter('all')}
+                          className="text-xs font-bold text-amber-700 dark:text-amber-300 underline hover:text-amber-900 dark:hover:text-amber-200 cursor-pointer"
                         >
-                          ล้างตัวกรอง
+                          ดูสินค้าทั้งหมด
                         </button>
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-2.5 sm:gap-3 w-full min-w-0 inventory-grid">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3.5 sm:gap-4 md:gap-4.5 w-full min-w-0 inventory-grid">
                       {filteredItems.map((item, index) => (
                         <ItemCard
                           key={item.id}
@@ -3060,7 +3018,6 @@ export default function App() {
                           isRecentlyUpdated={recentlyUpdatedItemIds.has(item.id)}
                           isLowSpec={deviceInfo.isLowSpec}
                           onOrderClick={handleOpenOrderModal}
-                          onQuickRequisition={handleOpenRequisitionModal}
                           isFavorite={favoriteItemIds.has(item.id)}
                           onToggleFavorite={handleToggleFavorite}
                         />
@@ -3195,7 +3152,7 @@ export default function App() {
                 onUpdateCurrentUser={handleUpdateCurrentUser}
                 onOpenAddItem={handleOpenAddItemModal}
                 onOpenNotificationSettings={(tab) => {
-                  setLineSettingsInitialTab(tab || 'line');
+                  setLineSettingsInitialTab(tab || 'webpush');
                   setIsLineSettingsModalOpen(true);
                 }}
                 onExportInventoryPdf={handleExportInventoryPdf}

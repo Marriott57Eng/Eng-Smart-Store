@@ -6,11 +6,11 @@ export const DEFAULT_LINE_CONFIG: LineNotificationConfig = {
   enabled: true,
   channelAccessToken: '9Q8ELV/INC2ERe2iG4ynfet8R8KnAygHHxgaGlPH6iCEX5/Ix5s/t7UORE+UftHLMQcsmL5fRu1OVBBBjDlBvXkAEPLpTjKnN9Osq7xgOw3ZKurF7kbu8HvVdP6NesC/RlkcyCLjSJV0L7puMiVlSwdB04t89/1O/w1cDnyilFU=',
   destinationId: 'Ud3217b5c26f2624b19c6f7eae5ab209c',
-  notifyStockOut: true,
-  notifyStockIn: true,
+  notifyStockOut: false,
+  notifyStockIn: false,
   notifyLogin: false,
   notifyLogout: false,
-  notifyLowStock: true,
+  notifyLowStock: false,
   notifyPurchaseOrder: true,
   useSeparateOrderDestination: true,
   purchaseOrderDestinationId: 'U02c89d2e8c0a7eea3cada8e1c2bcf814',
@@ -26,7 +26,15 @@ export const getLineConfig = async (): Promise<LineNotificationConfig> => {
     const docRef = doc(db, 'settings', 'line_config');
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      cachedConfig = { ...DEFAULT_LINE_CONFIG, ...(snap.data() as LineNotificationConfig) };
+      cachedConfig = {
+        ...DEFAULT_LINE_CONFIG,
+        ...(snap.data() as LineNotificationConfig),
+        notifyStockOut: false,
+        notifyStockIn: false,
+        notifyLogin: false,
+        notifyLogout: false,
+        notifyLowStock: false,
+      };
       return cachedConfig;
     }
   } catch (err) {
@@ -44,6 +52,11 @@ export const saveLineConfig = async (
   const updated: LineNotificationConfig = {
     ...current,
     ...config,
+    notifyStockOut: false,
+    notifyStockIn: false,
+    notifyLogin: false,
+    notifyLogout: false,
+    notifyLowStock: false,
     updatedAt: new Date().toISOString(),
     ...(updatedBy ? { updatedBy } : {}),
   };
@@ -70,111 +83,25 @@ export const saveLineConfig = async (
 };
 
 /**
- * Send LINE notification for Stock In / Stock Out
+ * General Stock In / Stock Out notifications are now sent via Web Push Notification only.
+ * LINE notifications are reserved strictly for Purchase Orders (สั่งของ) & Stock Inquiry Bot.
  */
-export const notifyStockTransaction = async (data: LineStockNotifyData): Promise<{ success: boolean; message?: string }> => {
-  try {
-    const payload = {
-      type: data.type === 'in' ? 'stock_in' : 'stock_out',
-      data: {
-        ...data,
-        timestamp: data.timestamp || new Date().toLocaleString('th-TH', { 
-          timeZone: 'Asia/Bangkok', 
-          dateStyle: 'medium', 
-          timeStyle: 'short' 
-        }),
-      },
-    };
-
-    const res = await fetch('/api/line/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { success: false, message: err.error || 'Failed to send LINE notification' };
-    }
-
-    const resData = await res.json();
-    return { success: resData.success, message: resData.message };
-  } catch (err: any) {
-    console.warn('LINE stock notify error:', err);
-    return { success: false, message: err.message };
-  }
+export const notifyStockTransaction = async (_data: LineStockNotifyData): Promise<{ success: boolean; message?: string }> => {
+  return { success: true, message: 'แจ้งเตือนผ่าน Web Push Notification เป็นหลัก (คงเหลือเฉพาะ LINE สั่งของ)' };
 };
 
 /**
- * Send LINE notification for Bulk Stock Out
+ * Bulk Stock Out / Stock In notifications are now sent via Web Push Notification only.
  */
-export const notifyBulkStockTransaction = async (data: LineBulkStockNotifyData): Promise<{ success: boolean; message?: string }> => {
-  try {
-    const payload = {
-      type: 'bulk_stock_out',
-      data: {
-        ...data,
-        timestamp: data.timestamp || new Date().toLocaleString('th-TH', { 
-          timeZone: 'Asia/Bangkok', 
-          dateStyle: 'medium', 
-          timeStyle: 'short' 
-        }),
-      },
-    };
-
-    const res = await fetch('/api/line/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { success: false, message: err.error || 'Failed to send LINE bulk notification' };
-    }
-
-    const resData = await res.json();
-    return { success: resData.success, message: resData.message };
-  } catch (err: any) {
-    console.warn('LINE bulk stock notify error:', err);
-    return { success: false, message: err.message };
-  }
+export const notifyBulkStockTransaction = async (_data: LineBulkStockNotifyData): Promise<{ success: boolean; message?: string }> => {
+  return { success: true, message: 'แจ้งเตือนผ่าน Web Push Notification เป็นหลัก (คงเหลือเฉพาะ LINE สั่งของ)' };
 };
 
 /**
- * Send LINE notification for User Login / Logout
+ * User Login / Logout notifications are disabled on LINE.
  */
-export const notifyAuthEvent = async (data: LineAuthNotifyData): Promise<{ success: boolean; message?: string }> => {
-  try {
-    const payload = {
-      type: data.type,
-      data: {
-        ...data,
-        timestamp: data.timestamp || new Date().toLocaleString('th-TH', { 
-          timeZone: 'Asia/Bangkok', 
-          dateStyle: 'medium', 
-          timeStyle: 'short' 
-        }),
-      },
-    };
-
-    const res = await fetch('/api/line/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { success: false, message: err.error || 'Failed to send LINE notification' };
-    }
-
-    const resData = await res.json();
-    return { success: resData.success, message: resData.message };
-  } catch (err: any) {
-    console.warn('LINE auth notify error:', err);
-    return { success: false, message: err.message };
-  }
+export const notifyAuthEvent = async (_data: LineAuthNotifyData): Promise<{ success: boolean; message?: string }> => {
+  return { success: true, message: 'ปิดการแจ้งเตือนเข้า-ออกระบบใน LINE' };
 };
 
 /**

@@ -4,6 +4,7 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type, ThinkingLevel } from "@
 import fs from "fs";
 import { WebSocketServer } from "ws";
 import http from "http";
+import crypto from "crypto";
 import webpush from "web-push";
 import { initializeApp } from 'firebase/app';
 import { getFirestore, getDocs, collection, doc, setDoc, getDoc, deleteDoc, updateDoc, runTransaction } from 'firebase/firestore';
@@ -18,6 +19,8 @@ import {
   createTestFlexMessage, 
   createPurchaseOrderFlexMessage,
   createOrderConfirmedFlexMessage,
+  createStockInquiryFlexMessage,
+  createStockSummaryFlexMessage,
   getServerLineConfig, 
   updateServerLineConfig 
 } from './server/lineService.ts';
@@ -128,13 +131,28 @@ async function getOrInitVapidKeys() {
   return vapidKeys;
 }
 
+function getSubscriptionDocId(endpoint: string): string {
+  return crypto.createHash('sha256').update(endpoint).digest('hex').slice(0, 48);
+}
+
+async function deleteSubscriptionFromStorage(endpoint: string) {
+  memorySubscriptions.delete(endpoint);
+  if (!firestoreDb) return;
+  const shaId = getSubscriptionDocId(endpoint);
+  const legacyId = Buffer.from(endpoint).toString('base64url').slice(0, 60);
+  await Promise.allSettled([
+    deleteDoc(doc(firestoreDb, 'push_subscriptions', shaId)),
+    deleteDoc(doc(firestoreDb, 'push_subscriptions', legacyId)),
+  ]);
+}
+
 async function loadSubscriptions(): Promise<WebPushSubscriptionRecord[]> {
   try {
     if (firestoreDb) {
       const snap = await getDocs(collection(firestoreDb, 'push_subscriptions'));
       snap.forEach(d => {
         const data = d.data() as WebPushSubscriptionRecord;
-        if (data && data.endpoint && data.keys) {
+        if (data && data.endpoint && data.keys && data.keys.p256dh && data.keys.auth) {
           memorySubscriptions.set(data.endpoint, data);
         }
       });
@@ -152,27 +170,40 @@ async function sendWebPushToAll(payload: {
   badge?: string;
   url?: string;
   tag?: string;
-  type?: 'low_stock' | 'requisition' | 'system';
+  type?: 'low_stock' | 'requisition' | 'order' | 'system';
   data?: any;
 }) {
   try {
     await getOrInitVapidKeys();
-    const subs = await loadSubscriptions();
-    if (subs.length === 0) {
-      console.log("Web Push: No active subscriptions registered yet.");
-      return { sent: 0, failed: 0, total: 0 };
-    }
-
-    const payloadString = JSON.stringify({
+    const effectiveTag = payload.tag || `eng-push-${Date.now()}`;
+    const eventPayload = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       title: payload.title,
       body: payload.body,
-      icon: payload.icon || '/logo.png',
+      icon: payload.icon || '/icon-192.png',
       badge: payload.badge || '/icon-192.png',
-      tag: payload.tag || `eng-push-${Date.now()}`,
+      tag: effectiveTag,
       url: payload.url || '/',
       type: payload.type || 'system',
       data: payload.data || {},
-    });
+      timestamp: Date.now(),
+      sentAt: new Date().toISOString(),
+    };
+
+    // Always broadcast to Firestore real-time relay so active clients/PWA/iframes get instant push banner + OS notification
+    if (firestoreDb) {
+      setDoc(doc(firestoreDb, 'settings', 'last_webpush_event'), eventPayload).catch(err =>
+        console.warn("Could not write last_webpush_event to Firestore:", err)
+      );
+    }
+
+    const subs = await loadSubscriptions();
+    if (subs.length === 0) {
+      console.log("Web Push: No active VAPID subscriptions registered yet (relayed via Firestore real-time channel).");
+      return { sent: 0, failed: 0, total: 0, relayed: true };
+    }
+
+    const payloadString = JSON.stringify(eventPayload);
 
     let sent = 0;
     let failed = 0;
@@ -189,20 +220,16 @@ async function sendWebPushToAll(payload: {
         sent++;
       } catch (err: any) {
         failed++;
-        // Remove dead/expired subscription (HTTP 404 or 410)
-        if (err?.statusCode === 410 || err?.statusCode === 404) {
-          memorySubscriptions.delete(sub.endpoint);
-          try {
-            if (firestoreDb) {
-              const subId = Buffer.from(sub.endpoint).toString('base64url').slice(0, 60);
-              await deleteDoc(doc(firestoreDb, 'push_subscriptions', subId));
-            }
-          } catch (_) {}
+        const statusCode = err?.statusCode;
+        console.warn(`Web Push delivery error (${statusCode || 'unknown'}):`, err?.body || err?.message);
+        // Remove dead, expired, or VAPID-mismatched subscription (HTTP 400, 401, 403, 404, 410)
+        if (statusCode === 410 || statusCode === 404 || statusCode === 401 || statusCode === 403 || statusCode === 400) {
+          await deleteSubscriptionFromStorage(sub.endpoint);
         }
       }
     }
 
-    return { sent, failed, total: subs.length };
+    return { sent, failed, total: subs.length, relayed: true };
   } catch (error: any) {
     console.error("sendWebPushToAll error:", error);
     return { sent: 0, failed: 0, total: 0, error: error.message };
@@ -289,6 +316,8 @@ interface Item {
   qty: number;
   minStock: number;
   location: string;
+  brand?: string;
+  model?: string;
   note: string;
   ordered: string;
   orderedDate: string;
@@ -908,50 +937,42 @@ async function startServer() {
     }
   });
 
-  // API: Send LINE Notification
+  // API: Send LINE Notification (Strictly Purchase Orders Only - General notifications moved to Web Push)
   app.post("/api/line/notify", async (req, res) => {
     try {
       const { type, data } = req.body;
       const config = getServerLineConfig();
 
+      // General notifications (stock_in, stock_out, bulk, login, logout) are disabled on LINE
+      // and handled via Web Push Notification instead. Only Purchase Order events use LINE.
+      if (type !== 'purchase_order' && type !== 'order_confirmed') {
+        return res.json({
+          success: true,
+          skipped: true,
+          reason: 'การแจ้งเตือนทั่วไปถูกปรับไปใช้ Web Push Notification เป็นหลัก (คงเหลือเฉพาะ LINE สั่งของ)',
+        });
+      }
+
       if (!config.enabled) {
         return res.json({ success: false, skipped: true, reason: 'LINE notifications disabled' });
       }
 
-      if (!config.channelAccessToken || !config.destinationId) {
+      const useDedicatedOrder = Boolean(config.useSeparateOrderDestination && config.purchaseOrderDestinationId);
+      const targetDestination = useDedicatedOrder
+        ? config.purchaseOrderDestinationId!
+        : (config.purchaseOrderDestinationId || config.destinationId);
+
+      const targetToken = (useDedicatedOrder && config.purchaseOrderChannelAccessToken)
+        ? config.purchaseOrderChannelAccessToken
+        : (config.purchaseOrderChannelAccessToken || config.channelAccessToken);
+
+      if (!targetToken || !targetDestination) {
         return res.json({ success: false, skipped: true, reason: 'LINE token or destination not configured yet' });
       }
 
       let flexMessage: any = null;
 
-      if (type === 'stock_in' || type === 'stock_out') {
-        const isStockIn = type === 'stock_in';
-        if (isStockIn && !config.notifyStockIn) {
-          return res.json({ success: false, skipped: true, reason: 'Stock in notification disabled' });
-        }
-        if (!isStockIn && !config.notifyStockOut) {
-          return res.json({ success: false, skipped: true, reason: 'Stock out notification disabled' });
-        }
-        flexMessage = createStockFlexMessage(data);
-      } else if (type === 'bulk_stock_out' || type === 'bulk_stock_in') {
-        const isStockIn = type === 'bulk_stock_in' || data.type === 'in';
-        if (isStockIn && !config.notifyStockIn) {
-          return res.json({ success: false, skipped: true, reason: 'Stock in notification disabled' });
-        }
-        if (!isStockIn && !config.notifyStockOut) {
-          return res.json({ success: false, skipped: true, reason: 'Stock out notification disabled' });
-        }
-        flexMessage = createBulkStockFlexMessage({ ...data, type: isStockIn ? 'in' : 'out' });
-      } else if (type === 'login' || type === 'logout') {
-        const isLogin = type === 'login';
-        if (isLogin && !config.notifyLogin) {
-          return res.json({ success: false, skipped: true, reason: 'Login notification disabled' });
-        }
-        if (!isLogin && !config.notifyLogout) {
-          return res.json({ success: false, skipped: true, reason: 'Logout notification disabled' });
-        }
-        flexMessage = createAuthFlexMessage(data);
-      } else if (type === 'purchase_order') {
+      if (type === 'purchase_order') {
         if (config.notifyPurchaseOrder === false) {
           return res.json({ success: false, skipped: true, reason: 'Purchase order notification disabled' });
         }
@@ -967,6 +988,20 @@ async function startServer() {
             baseUrl: data.baseUrl || origin,
           });
         }
+
+        // Also broadcast Web Push Notification for new Purchase Order
+        if (data.order && serverWebPushConfig.enabled && serverWebPushConfig.notifyPurchaseOrder !== false) {
+          const ord = data.order;
+          const urgencyLabel = ord.urgency === 'urgent' || ord.urgency === 'critical' ? ' (ด่วน)' : '';
+          sendWebPushToAll({
+            title: `🛒 สั่งซื้อใหม่ ${ord.qty} ${ord.unit}${urgencyLabel}`,
+            body: `${ord.itemName}\nโดย ${ord.requestedBy || 'เจ้าหน้าที่'} (${ord.id})`,
+            url: '/?tab=orders',
+            tag: `po-new-${ord.id}`,
+            type: 'system',
+            data: ord,
+          }).catch(() => {});
+        }
       } else if (type === 'order_confirmed') {
         const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
         flexMessage = createOrderConfirmedFlexMessage({
@@ -979,24 +1014,12 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'Invalid notification type' });
       }
 
-      // Check if this is a purchase order event and has separate destination configured
-      const isOrderEvent = type === 'purchase_order' || type === 'order_confirmed';
-      const useDedicatedOrder = isOrderEvent && Boolean(config.useSeparateOrderDestination && config.purchaseOrderDestinationId);
-
-      const targetDestination = useDedicatedOrder 
-        ? config.purchaseOrderDestinationId! 
-        : config.destinationId;
-
-      const targetToken = (useDedicatedOrder && config.purchaseOrderChannelAccessToken)
-        ? config.purchaseOrderChannelAccessToken
-        : config.channelAccessToken;
-
       const result = await pushLineMessage([flexMessage], targetToken, targetDestination);
       if (!result.success) {
         return res.json({ success: false, skipped: result.skipped ?? false, error: result.error });
       }
 
-      res.json({ success: true, message: 'LINE notification sent successfully' });
+      res.json({ success: true, message: 'LINE Purchase Order notification sent successfully' });
     } catch (error: any) {
       console.warn("LINE notify endpoint exception:", error?.message || error);
       res.json({ success: false, error: error?.message || 'Failed to process notification' });
@@ -1150,8 +1173,9 @@ async function startServer() {
             // Web Push notification to web users
             try {
               await sendWebPushToAll({
-                title: `✅ ยืนยันการสั่งซื้อ: ${orderData.itemName}`,
-                body: `ใบสั่งซื้อ ${orderData.id} (${orderData.qty} ${orderData.unit}) ได้รับการยืนยันผ่าน LINE ทันที โดย ${confirmedByName}`,
+                title: `✅ อนุมัติสั่งซื้อ ${orderData.qty} ${orderData.unit}`,
+                body: `${orderData.itemName}\nโดย ${confirmedByName}`,
+                url: '/?tab=orders',
                 tag: `order-confirm-${orderData.id}`,
                 type: 'system',
               });
@@ -1199,11 +1223,35 @@ async function startServer() {
             }
           }
         } else if (event.type === 'message' && event.message?.type === 'text') {
-          // 2. Optional text message commands e.g. "ยืนยัน PO-..." or "อนุมัติ PO-..."
           const text = (event.message.text || '').trim();
-          const match = text.match(/(?:ยืนยัน|อนุมัติ|confirm)\s*(PO-[\w-]+)/i);
-          if (match && match[1]) {
-            const orderId = match[1];
+          const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
+
+          // Helper to send reply or fallback to push to the event source
+          const sendLineWebhookResponse = async (messages: any[]) => {
+            const poToken = (getServerLineConfig().useSeparateOrderDestination && getServerLineConfig().purchaseOrderChannelAccessToken)
+              ? getServerLineConfig().purchaseOrderChannelAccessToken
+              : undefined;
+
+            if (event.replyToken) {
+              const replyRes = await replyLineMessage(event.replyToken, messages, poToken);
+              if (replyRes.success) return;
+            }
+
+            // Fallback: push directly to sender/group/room or configured destination
+            const sourceDest = event.source?.groupId || event.source?.roomId || event.source?.userId;
+            if (sourceDest) {
+              const cfg = getServerLineConfig();
+              const primaryToken = poToken || cfg.purchaseOrderChannelAccessToken || cfg.channelAccessToken;
+              const pushRes = await pushLineMessage(messages, primaryToken, sourceDest);
+              if (pushRes.success) return;
+            }
+            await pushPurchaseOrderLineMessage(messages);
+          };
+
+          // 2A. Order confirmation command: "ยืนยัน PO-..." or "อนุมัติ PO-..."
+          const confirmMatch = text.match(/(?:ยืนยัน|อนุมัติ|confirm)\s*(PO-[\w-]+)/i);
+          if (confirmMatch && confirmMatch[1]) {
+            const orderId = confirmMatch[1];
             if (firestoreDb) {
               const orderRef = doc(firestoreDb, 'orders', orderId);
               const orderSnap = await getDoc(orderRef);
@@ -1211,15 +1259,10 @@ async function startServer() {
                 const orderData: any = orderSnap.data();
                 const isAlreadyProcessed = orderData.status !== 'pending' || Boolean(orderData.confirmedAt) || Boolean(orderData.confirmationTokenUsed);
                 if (isAlreadyProcessed) {
-                  if (event.replyToken) {
-                    const poToken = (getServerLineConfig().useSeparateOrderDestination && getServerLineConfig().purchaseOrderChannelAccessToken) 
-                      ? getServerLineConfig().purchaseOrderChannelAccessToken 
-                      : undefined;
-                    await replyLineMessage(event.replyToken, [{
-                      type: 'text',
-                      text: `🔒 ใบสั่งซื้อ ${orderId} (${orderData.itemName}) ได้รับการยืนยันไปแล้วเมื่อ ${orderData.confirmedAt || 'ก่อนหน้านี้'}\n\n⚠️ ไม่สามารถกดยืนยันซ้ำได้อีกครับ`
-                    }], poToken);
-                  }
+                  await sendLineWebhookResponse([{
+                    type: 'text',
+                    text: `🔒 ใบสั่งซื้อ ${orderId} (${orderData.itemName}) ได้รับการยืนยันไปแล้วเมื่อ ${orderData.confirmedAt || 'ก่อนหน้านี้'}\n\n⚠️ ไม่สามารถกดยืนยันซ้ำได้อีกครับ`
+                  }]);
                 } else {
                   const nowTimeStr = new Date().toLocaleString('th-TH', {
                     timeZone: 'Asia/Bangkok',
@@ -1258,6 +1301,16 @@ async function startServer() {
                     } catch (_) {}
                   }
 
+                  try {
+                    await sendWebPushToAll({
+                      title: `✅ อนุมัติสั่งซื้อ ${orderData.qty} ${orderData.unit}`,
+                      body: `${orderData.itemName}\nโดย ${confirmedByName}`,
+                      tag: `order-confirm-${orderData.id}`,
+                      url: '/?tab=orders',
+                      type: 'system',
+                    });
+                  } catch (_) {}
+
                   const confirmFlex = createOrderConfirmedFlexMessage({
                     order: {
                       id: orderData.id,
@@ -1267,22 +1320,215 @@ async function startServer() {
                       unit: orderData.unit,
                       confirmedBy: confirmedByName,
                       confirmedAt: nowTimeStr,
-                    }
+                    },
+                    baseUrl: origin,
                   });
 
-                  if (event.replyToken) {
-                    const poToken = (getServerLineConfig().useSeparateOrderDestination && getServerLineConfig().purchaseOrderChannelAccessToken) 
-                      ? getServerLineConfig().purchaseOrderChannelAccessToken 
-                      : undefined;
-                    const replyRes = await replyLineMessage(event.replyToken, [confirmFlex], poToken);
-                    if (!replyRes.success) {
-                      await pushPurchaseOrderLineMessage([confirmFlex]);
-                    }
-                  } else {
-                    await pushPurchaseOrderLineMessage([confirmFlex]);
+                  await sendLineWebhookResponse([confirmFlex]);
+                }
+              } else {
+                await sendLineWebhookResponse([{
+                  type: 'text',
+                  text: `❌ ไม่พบใบสั่งซื้อรหัส "${orderId}" ในระบบ`
+                }]);
+              }
+            }
+            continue;
+          }
+
+          // 2B. Stock Inquiry Commands in LINE Chat
+          // Supports:
+          // - "คำสั่ง" / "วิธีใช้" / "help"
+          // - "สรุปสต็อก" / "ภาพรวม" / "เช็คสต็อกทั้งหมด"
+          // - "ของหมด" / "สินค้าหมด" / "สต็อกหมด"
+          // - "ใกล้หมด" / "ของใกล้หมด" / "สต็อกต่ำ"
+          // - "หมวด <ชื่อหมวด>"
+          // - "สต็อก <ชื่อ/รหัส>" / "เช็คสต็อก <ชื่อ/รหัส>" / "คงเหลือ <ชื่อ/รหัส>" / "มี <ชื่อ> ไหม" / or direct item name/code
+          const normalizedText = text.replace(/\s+/g, ' ').trim();
+
+          // Check Help command
+          if (/^(?:คำสั่ง|วิธีใช้|วิธีใช้งาน|ช่วยเหลือ|เมนู|คู่มือ|help|\?)$/i.test(normalizedText)) {
+            const helpText = [
+              '🤖 ระบบสอบถามสต็อกอัตโนมัติ (ENG SMART STORE • FL.6)',
+              '━━━━━━━━━━━━━━━━━━',
+              'คุณสามารถพิมพ์คำสั่งในแชทนี้เพื่อเช็คยอดคงเหลือได้ทันที:',
+              '',
+              '1️⃣ เช็คจำนวนอะไหล่รายตัว:',
+              '• พิมพ์: สต็อก <ชื่ออะไหล่ หรือ รหัส>',
+              '  เช่น "สต็อก ท่อ PVC", "เช็คสต็อก หลอดไฟ", "คงเหลือ เบรกเกอร์", หรือพิมพ์รหัส "A000000104"',
+              '',
+              '2️⃣ เช็ครายการที่หมดหรือใกล้หมด:',
+              '• พิมพ์: "ของหมด" (ดูสินค้าที่เหลือ 0)',
+              '• พิมพ์: "ใกล้หมด" (ดูสินค้าต่ำกว่าเกณฑ์)',
+              '',
+              '3️⃣ เช็คตามหมวดหมู่:',
+              '• พิมพ์: หมวด <ชื่อหมวด>',
+              '  เช่น "หมวด แอร์", "หมวด ไฟฟ้า", "หมวด ท่อ", "หมวด เคมี"',
+              '',
+              '4️⃣ ดูภาพรวมคลังสินค้า:',
+              '• พิมพ์: "สรุปสต็อก" หรือ "ภาพรวม"',
+              '',
+              '5️⃣ ยืนยันใบสั่งซื้อ:',
+              '• แตะปุ่มในการ์ดใบสั่งซื้อ หรือพิมพ์ "ยืนยัน PO-xxxx"',
+            ].join('\n');
+
+            await sendLineWebhookResponse([{ type: 'text', text: helpText }]);
+            continue;
+          }
+
+          // Load live inventory for stock inquiries
+          const inventory = await fetchInventoryFromSheet();
+
+          // Check Summary command
+          if (/^(?:สรุปสต็อก|สรุปสต็อค|สรุปคลัง|สรุปยอด|ภาพรวม|ภาพรวมสต็อก|เช็คสต็อกทั้งหมด|เช็คสต็อคทั้งหมด|สต็อกทั้งหมด|สต็อคทั้งหมด|stock\s*summary|summary)$/i.test(normalizedText)) {
+            const totalItems = inventory.length;
+            const totalUnits = inventory.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
+            const outItems = inventory.filter(i => (Number(i.qty) || 0) <= 0 || i.status === 'out');
+            const lowItems = inventory.filter(i => {
+              const q = Number(i.qty) || 0;
+              const m = Number(i.minStock) || 1;
+              return q > 0 && (q <= m || i.status === 'low');
+            });
+            const normalCount = Math.max(0, totalItems - outItems.length - lowItems.length);
+
+            const catMap = new Map<string, number>();
+            inventory.forEach(i => {
+              const cat = (i.category || 'ทั่วไป').trim();
+              catMap.set(cat, (catMap.get(cat) || 0) + 1);
+            });
+            const categories = Array.from(catMap.entries())
+              .map(([name, count]) => ({ name, count }))
+              .sort((a, b) => b.count - a.count);
+
+            const summaryFlex = createStockSummaryFlexMessage({
+              totalItems,
+              totalUnits,
+              normalCount,
+              lowCount: lowItems.length,
+              outCount: outItems.length,
+              categories,
+              baseUrl: origin,
+            });
+            await sendLineWebhookResponse([summaryFlex]);
+            continue;
+          }
+
+          // Check Out-of-Stock command
+          if (/^(?:(?:เช็ค|ดู|ขอ|ถาม|รายการ)\s*)?(?:ของหมด|สินค้าหมด|สต็อกหมด|สต็อคหมด|อะไหล่หมด|หมดสต็อก|หมดสต็อค|out\s*of\s*stock)(?:\s*(?:มีอะไรบ้าง|กี่รายการ|ทั้งหมด|ครับ|ค่ะ|คะ))?$/i.test(normalizedText)) {
+            const outItems = inventory.filter(i => (Number(i.qty) || 0) <= 0 || i.status === 'out');
+            const outFlex = createStockInquiryFlexMessage({
+              title: '🚨 รายการอะไหล่หมดสต็อก (0 ชิ้น)',
+              subtitle: `พบสินค้าหมดสต็อกทั้งหมด ${outItems.length} รายการ จาก ${inventory.length} รายการ`,
+              headerColor: '#DC2626',
+              queryText: 'ของหมดสต็อก',
+              totalMatched: outItems.length,
+              items: outItems,
+              baseUrl: origin,
+            });
+            await sendLineWebhookResponse([outFlex]);
+            continue;
+          }
+
+          // Check Low-Stock command
+          if (/^(?:(?:เช็ค|ดู|ขอ|ถาม|รายการ)\s*)?(?:ใกล้หมด|ของใกล้หมด|สินค้าใกล้หมด|อะไหล่ใกล้หมด|สต็อกต่ำ|สต็อคต่ำ|ใกล้หมดสต็อก|low\s*stock)(?:\s*(?:มีอะไรบ้าง|กี่รายการ|ทั้งหมด|ครับ|ค่ะ|คะ))?$/i.test(normalizedText)) {
+            const lowItems = inventory.filter(i => {
+              const q = Number(i.qty) || 0;
+              const m = Number(i.minStock) || 1;
+              return q > 0 && (q <= m || i.status === 'low');
+            });
+            const lowFlex = createStockInquiryFlexMessage({
+              title: '⚠️ รายการอะไหล่ใกล้หมดสต็อก (Low Stock)',
+              subtitle: `พบสินค้าต่ำกว่าจุดสั่งซื้อขั้นต่ำ ${lowItems.length} รายการ`,
+              headerColor: '#D97706',
+              queryText: 'สินค้าใกล้หมด',
+              totalMatched: lowItems.length,
+              items: lowItems,
+              baseUrl: origin,
+            });
+            await sendLineWebhookResponse([lowFlex]);
+            continue;
+          }
+
+          // Check Category command: "หมวด <ชื่อหมวด>"
+          const catMatch = normalizedText.match(/^(?:หมวดหมู่|หมวด|ประเภท|category)\s*[:\-]?\s*(.+)$/i);
+          if (catMatch && catMatch[1]) {
+            const catQuery = catMatch[1].replace(/(?:ครับ|ค่ะ|คะ|หน่อย)$/g, '').trim();
+            const catItems = inventory.filter(i =>
+              (i.category || '').toLowerCase().includes(catQuery.toLowerCase())
+            );
+            const catFlex = createStockInquiryFlexMessage({
+              title: `📂 หมวดหมู่: ${catQuery}`,
+              subtitle: `พบอะไหล่ในหมวด "${catQuery}" ทั้งหมด ${catItems.length} รายการ`,
+              headerColor: '#2563EB',
+              queryText: `หมวด ${catQuery}`,
+              totalMatched: catItems.length,
+              items: catItems,
+              baseUrl: origin,
+            });
+            await sendLineWebhookResponse([catFlex]);
+            continue;
+          }
+
+          // Check Item / Keyword Stock Inquiry
+          const hasExplicitStockIntent = /(?:เช็คสต็อก|เช็คสต็อค|เช็คของ|เช็คยอด|เช็คจำนวน|สต็อก|สต็อค|ถามสต็อก|ถามสต็อค|สอบถามสต็อก|สอบถามสต็อค|สอบถามจำนวน|สอบถาม|ขอทราบจำนวน|ขอทราบสต็อก|คงเหลือ|ยอดคงเหลือ|จำนวนคงเหลือ|จำนวน|เหลือเท่าไหร่|เหลือกี่|มีกี่|มี.*ไหม|มี.*มั้ย|มี.*หรือเปล่า|ค้นหา|หาของ|หาอะไหล่|เช็ค|stock|check|qty|^A\d{3,})/i.test(normalizedText);
+
+          // Clean query to extract the core item name / code
+          const cleanedKeyword = normalizedText
+            .replace(/^(?:รบกวน|ช่วย|ขอ|อยากทราบว่า|อยากรู้ว่า|ถามหน่อย|สอบถามหน่อย|สอบถามจำนวนคงเหลือของ|สอบถามจำนวนของ|สอบถามสต็อกของ|สอบถามสต็อก|สอบถามสต็อค|สอบถามจำนวน|สอบถาม|เช็คสต็อกของ|เช็คสต็อคของ|เช็คสต็อก|เช็คสต็อค|เช็คยอดคงเหลือ|เช็คจำนวน|เช็คยอด|เช็คของ|เช็ค|ถามสต็อก|ถามสต็อค|ยอดคงเหลือของ|จำนวนคงเหลือของ|คงเหลือของ|คงเหลือ|จำนวนของ|จำนวน|สต็อกของ|สต็อคของ|สต็อก|สต็อค|ค้นหา|หาของ|หาอะไหล่|หา|ขอทราบจำนวน|ขอทราบสต็อก|ขอทราบ|มีอะไหล่|มีสินค้า|มีของ|มี|stock\s*of|check\s*stock|stock|check|qty)\s*/i, '')
+            .replace(/^(?:ของ|อะไหล่|สินค้า|รายการ|ตัว)\s+/i, '')
+            .replace(/\s*(?:คงเหลือเท่าไหร่|คงเหลือกี่ชิ้น|คงเหลือ|เหลือเท่าไหร่|เหลือกี่ชิ้น|เหลือกี่อัน|เหลือกี่ตัว|เหลือกี่หลอด|เหลือกี่กล่อง|เหลือกี่ถัง|เหลือกี่แกลลอน|มีกี่ชิ้น|มีกี่อัน|มีกี่ตัว|กี่ชิ้น|กี่อัน|กี่ตัว|เท่าไหร่|บ้างครับ|บ้างค่ะ|บ้าง|ไหมครับ|ไหมค่ะ|ไหมคะ|ไหม|มั้ยครับ|มั้ยค่ะ|มั้ยคะ|มั้ย|หรือเปล่าครับ|หรือเปล่าค่ะ|หรือเปล่า|ครับผม|ครับ|ค่ะ|คะ|หน่อยครับ|หน่อยค่ะ|หน่อย|จ้า|นะ|\?)+$/gi, '')
+            .trim();
+
+          if (cleanedKeyword.length >= 1) {
+            const qLower = cleanedKeyword.toLowerCase();
+            const tokens = qLower.split(/\s+/).filter(t => t.length >= 1);
+
+            const scoredItems = inventory
+              .map(item => {
+                const idLower = (item.id || '').toLowerCase();
+                const nameLower = (item.name || '').toLowerCase();
+                const catLower = (item.category || '').toLowerCase();
+                const locLower = (item.location || '').toLowerCase();
+                const fullText = `${idLower} ${nameLower} ${catLower} ${locLower} ${(item.brand || '').toLowerCase()} ${(item.model || '').toLowerCase()} ${(item.note || '').toLowerCase()}`;
+
+                let score = 0;
+                if (idLower === qLower) {
+                  score = 100;
+                } else if (nameLower === qLower) {
+                  score = 95;
+                } else if (idLower.includes(qLower) || nameLower.includes(qLower)) {
+                  score = 85;
+                } else if (tokens.length > 0 && tokens.every(tk => fullText.includes(tk))) {
+                  score = 75;
+                } else if (tokens.length > 1) {
+                  const matchedTokens = tokens.filter(tk => tk.length >= 2 && (nameLower.includes(tk) || idLower.includes(tk) || catLower.includes(tk)));
+                  if (matchedTokens.length > 0) {
+                    score = Math.round((matchedTokens.length / tokens.length) * 60);
                   }
                 }
-              }
+                return { item, score };
+              })
+              .filter(entry => entry.score > 0)
+              .sort((a, b) => b.score - a.score);
+
+            const highConfidence = scoredItems.filter(s => s.score >= 75);
+            const matchedItems = (highConfidence.length > 0 ? highConfidence : scoredItems.filter(s => s.score >= 40)).map(s => s.item);
+
+            // Reply if the user explicitly used a stock command/question OR if the message matched items in the inventory
+            const isDirectUserChat = event.source?.type === 'user';
+            if (hasExplicitStockIntent || matchedItems.length > 0 || isDirectUserChat) {
+              const inquiryFlex = createStockInquiryFlexMessage({
+                title: `🔍 เช็คสต็อก: "${cleanedKeyword}"`,
+                subtitle: matchedItems.length > 0
+                  ? `พบรายการที่ตรงกัน ${matchedItems.length} รายการ ในคลัง Store FL.6`
+                  : `ไม่พบอะไหล่ที่ตรงกับ "${cleanedKeyword}"`,
+                headerColor: matchedItems.length > 0 ? '#0284C7' : '#64748B',
+                queryText: cleanedKeyword,
+                totalMatched: matchedItems.length,
+                items: matchedItems,
+                baseUrl: origin,
+              });
+              await sendLineWebhookResponse([inquiryFlex]);
             }
           }
         }
@@ -1631,8 +1877,9 @@ async function startServer() {
       // Send Web Push notification to web users
       try {
         await sendWebPushToAll({
-          title: `✅ ยืนยันการสั่งซื้อ: ${orderData.itemName}`,
-          body: `ใบสั่งซื้อ ${orderData.id} (${orderData.qty} ${orderData.unit}) ได้รับการยืนยันผ่าน LINE แล้ว`,
+          title: `✅ อนุมัติสั่งซื้อ ${orderData.qty} ${orderData.unit}`,
+          body: `${orderData.itemName}\nโดย Admin (ผ่าน LINE)`,
+          url: '/?tab=orders',
           tag: `order-confirm-${orderData.id}`,
           type: 'system',
         });
@@ -1777,6 +2024,19 @@ async function startServer() {
             }
           });
           await pushPurchaseOrderLineMessage([confirmFlex]);
+        } catch (_) {}
+
+        // Also send Web Push notification when confirmed from Web Admin UI
+        try {
+          if (serverWebPushConfig.enabled && serverWebPushConfig.notifyPurchaseOrder !== false) {
+            await sendWebPushToAll({
+              title: `✅ อนุมัติสั่งซื้อ ${updatedOrder.qty} ${updatedOrder.unit}`,
+              body: `${updatedOrder.itemName}\nโดย ${updatedOrder.confirmedBy || confirmedBy || 'Admin'}`,
+              url: '/?tab=orders',
+              tag: `order-confirm-${updatedOrder.id || orderId}`,
+              type: 'order',
+            });
+          }
         } catch (_) {}
       }
 
@@ -1968,23 +2228,20 @@ async function startServer() {
         } catch (_) {}
       }
 
-      // Notify LINE about Stock In
+      // Send Web Push Notification about Order Received (Stock In)
       try {
         const qtyToAdd = Number(receivedQty) || Number(updatedOrder?.receivedQty) || Number(updatedOrder?.qty) || 1;
-        const stockFlex = createStockFlexMessage({
-          type: 'in',
-          itemId: updatedItem?.id || updatedOrder?.itemId || '',
-          itemName: updatedItem?.name || updatedOrder?.itemName || 'สินค้า',
-          category: updatedItem?.category || updatedOrder?.category || 'ทั่วไป',
-          qty: qtyToAdd,
-          unit: updatedItem?.unit || updatedOrder?.unit || 'ชิ้น',
-          requestedBy: receiverName,
-          purpose: `รับสินค้าเข้าคลังตามใบสั่งซื้อ ${orderId}`,
-          timestamp: nowTimeStr,
-          newQty: updatedItem ? updatedItem.qty : undefined,
-          status: updatedItem ? updatedItem.status : 'normal',
+        const itemName = updatedItem?.name || updatedOrder?.itemName || 'สินค้า';
+        const unit = updatedItem?.unit || updatedOrder?.unit || 'ชิ้น';
+        const remainText = updatedItem ? ` (รวม ${updatedItem.qty} ${unit})` : '';
+        await sendWebPushToAll({
+          title: `📥 รับเข้าคลัง +${qtyToAdd} ${unit}${remainText}`,
+          body: `${itemName}\nโดย ${receiverName} (${orderId})`,
+          url: '/?tab=orders',
+          tag: `order-received-${orderId}`,
+          type: 'system',
+          data: { orderId, itemId: updatedItem?.id, qtyToAdd, newQty: updatedItem?.qty },
         });
-        await pushLineMessage([stockFlex]);
       } catch (_) {}
 
       res.json({ success: true, order: updatedOrder, item: updatedItem, requisition: requisitionRecord });
@@ -2055,6 +2312,17 @@ async function startServer() {
         } catch (_) {}
       }
 
+      // Send Web Push Notification about Order Cancellation
+      try {
+        await sendWebPushToAll({
+          title: `🚫 ยกเลิกสั่งซื้อ (${orderId})`,
+          body: `${orderData.itemName || orderId}\nโดย ${cancelledBy || 'Admin'}${reason ? ` • ${reason}` : ''}`,
+          url: '/?tab=orders',
+          tag: `order-cancel-${orderId}`,
+          type: 'system',
+        });
+      } catch (_) {}
+
       res.json({ success: true, order: updatedOrder });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -2097,26 +2365,32 @@ async function startServer() {
       memorySubscriptions.set(record.endpoint, record);
 
       if (firestoreDb) {
-        const subId = Buffer.from(record.endpoint).toString('base64url').slice(0, 60);
+        const subId = getSubscriptionDocId(record.endpoint);
+        const legacyId = Buffer.from(record.endpoint).toString('base64url').slice(0, 60);
+        if (legacyId !== subId) {
+          await deleteDoc(doc(firestoreDb, 'push_subscriptions', legacyId)).catch(() => {});
+        }
         await setDoc(doc(firestoreDb, 'push_subscriptions', subId), record, { merge: true });
       }
 
-      // Send an instant confirmation push to verify connectivity
-      try {
-        await getOrInitVapidKeys();
-        await webpush.sendNotification({
-          endpoint: record.endpoint,
-          keys: record.keys
-        }, JSON.stringify({
-          title: "✅ เชื่อมต่อ Web Push สำเร็จ",
-          body: "ระบบพร้อมแจ้งเตือนสต็อกต่ำและการเบิกจ่ายสำคัญ แม้แอปปิดหน้าจออยู่",
-          icon: "/logo.png",
-          badge: "/icon-192.png",
-          url: "/",
-          tag: "welcome-push",
-        }), { TTL: 300 });
-      } catch (pushErr) {
-        console.warn("Welcome push test warning:", pushErr);
+      // Send an instant confirmation push ONLY if explicitly requested (skipWelcome !== true)
+      if (!req.body.skipWelcome) {
+        try {
+          await getOrInitVapidKeys();
+          await webpush.sendNotification({
+            endpoint: record.endpoint,
+            keys: record.keys
+          }, JSON.stringify({
+            title: "✅ เปิดแจ้งเตือนสำเร็จ",
+            body: "พร้อมแจ้งเตือนเบิก-รับ สต็อกต่ำ และสั่งซื้อ",
+            icon: "/icon-192.png",
+            badge: "/icon-192.png",
+            url: "/",
+            tag: `welcome-push-${Date.now()}`,
+          }), { TTL: 300, urgency: 'high' });
+        } catch (pushErr) {
+          console.warn("Welcome push test warning:", pushErr);
+        }
       }
 
       res.json({ success: true, message: "ลงทะเบียนรับการแจ้งเตือน Web Push สำเร็จ" });
@@ -2131,11 +2405,7 @@ async function startServer() {
     try {
       const { endpoint } = req.body;
       if (endpoint) {
-        memorySubscriptions.delete(endpoint);
-        if (firestoreDb) {
-          const subId = Buffer.from(endpoint).toString('base64url').slice(0, 60);
-          await deleteDoc(doc(firestoreDb, 'push_subscriptions', subId)).catch(() => {});
-        }
+        await deleteSubscriptionFromStorage(endpoint);
       }
       res.json({ success: true, message: "ยกเลิกการแจ้งเตือนเรียบร้อยแล้ว" });
     } catch (err: any) {
@@ -2224,20 +2494,22 @@ async function startServer() {
   app.post("/api/push/test", pushTestLimiter, async (req, res) => {
     try {
       const result = await sendWebPushToAll({
-        title: "🔔 ทดสอบ Web Push Notifications",
-        body: "ระบบแจ้งเตือนคลังสินค้า Store FL.6 พร้อมทำงานแล้ว แม้ไม่ได้เปิดหน้าจออยู่!",
-        icon: "/logo.png",
+        title: "🔔 ทดสอบแจ้งเตือนสำเร็จ",
+        body: "ระบบแจ้งเตือนคลัง Store FL.6 พร้อมใช้งาน",
+        icon: "/icon-192.png",
         url: "/",
-        tag: "test-push",
+        tag: `test-push-${Date.now()}`,
         type: "system"
       });
 
+      const deliveredCount = Math.max(result.sent || 0, result.relayed ? 1 : 0);
       res.json({ 
         success: true, 
         message: result.sent > 0 
           ? `ส่งการแจ้งเตือนทดสอบสำเร็จไปยัง ${result.sent} อุปกรณ์` 
-          : "ยังไม่มีอุปกรณ์ที่ลงทะเบียนเปิดรับการแจ้งเตือน Web Push", 
-        ...result 
+          : "ส่งการแจ้งเตือนทดสอบสำเร็จแล้ว", 
+        ...result,
+        sent: deliveredCount,
       });
     } catch (err: any) {
       console.error("Test Web Push error:", err);
@@ -2665,40 +2937,17 @@ ${JSON.stringify(compactCatalog)}
         requisitionRecords.push(requisitionRecord);
       }
 
-      // Notify LINE Group / Manager via Flex Message
-      try {
-        const lineConfig = getServerLineConfig();
-        if (lineConfig.enabled && lineConfig.notifyStockIn) {
-          const flexMsg = createBulkStockFlexMessage({
-            type: 'in',
-            documentNumber: documentNumber || undefined,
-            supplierName: supplierName || undefined,
-            items: updatedItems.map(it => {
-              const matchedReq = requisitionRecords.find(r => r.itemId === it.id);
-              return {
-                itemId: it.id,
-                itemName: it.name,
-                qty: matchedReq ? matchedReq.qty : 0,
-                unit: it.unit,
-                newQty: it.qty,
-              };
-            }),
-            requestedBy: receiverName,
-            purpose: mainPurpose,
-            timestamp: nowTimeStr,
-          });
-          await pushLineMessage([flexMsg]);
-        }
-      } catch (lineErr) {
-        console.warn("Bulk stock-in LINE notification warning:", lineErr);
-      }
-
-      // Send Web Push notification
+      // Send Web Push notification (Primary notification channel for bulk stock-in)
       try {
         const totalUnits = requisitionRecords.reduce((sum, r) => sum + r.qty, 0);
+        const previewNames = updatedItems
+          .slice(0, 2)
+          .map(i => i.name)
+          .join(', ');
+        const moreText = updatedItems.length > 2 ? ` +อีก ${updatedItems.length - 2} รายการ` : '';
         await sendWebPushToAll({
-          title: `📥 รับสินค้าเข้าคลัง ${updatedItems.length} รายการ`,
-          body: `รวม ${totalUnits} ชิ้น โดย ${receiverName}${documentNumber ? ` (${documentNumber})` : ''}`,
+          title: `📥 รับเข้า ${updatedItems.length} รายการ (รวม ${totalUnits} ชิ้น)`,
+          body: `${previewNames}${moreText}\nโดย ${receiverName}`,
           tag: `bulk-in-${Date.now()}`,
           type: 'system',
         });

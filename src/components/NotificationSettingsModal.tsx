@@ -40,7 +40,9 @@ import {
   saveWebPushConfig, 
   subscribeToWebPush, 
   unsubscribeFromWebPush, 
-  testWebPushNotification 
+  testWebPushNotification,
+  syncExistingPushSubscription,
+  isDeviceWebPushEnabled
 } from '../utils/webPush';
 
 export interface NotificationSettingsModalProps {
@@ -112,7 +114,8 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
   const checkWebPushStatus = async () => {
     const supported = isWebPushSupported();
     setWebPushSupported(supported);
-    setPushPermission(getWebPushPermission());
+    const currentPerm = getWebPushPermission();
+    setPushPermission(currentPerm);
     
     // Always fetch the central config from Firestore/server so all users inherit Admin's rules
     try {
@@ -122,14 +125,11 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
       setWebPushConfig(getWebPushConfig());
     }
 
-    if (supported && 'serviceWorker' in navigator) {
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        setIsPushSubscribed(!!sub);
-      } catch (e) {
-        console.warn('Check push subscription error:', e);
-      }
+    if (currentPerm === 'granted') {
+      const synced = await syncExistingPushSubscription(currentUser);
+      setIsPushSubscribed(synced || isDeviceWebPushEnabled());
+    } else {
+      setIsPushSubscribed(isDeviceWebPushEnabled());
     }
   };
 
@@ -149,7 +149,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
         const res = await subscribeToWebPush(currentUser);
         if (res.success) {
           setIsPushSubscribed(true);
-          setPushPermission('granted');
+          setPushPermission(getWebPushPermission());
           setPushMessage({ type: 'success', text: 'เปิดรับการแจ้งเตือน Web Push บนอุปกรณ์นี้สำเร็จแล้ว! พร้อมรับแจ้งเตือนตามเงื่อนไขที่แอดมินกำหนด' });
         } else {
           setPushPermission(getWebPushPermission());
@@ -186,11 +186,13 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
     setPushTesting(true);
     setPushMessage(null);
     try {
-      const res = await testWebPushNotification();
+      const res = await testWebPushNotification(currentUser);
       if (res.success) {
+        setIsPushSubscribed(true);
+        setPushPermission(getWebPushPermission());
         setPushMessage({ 
           type: 'success', 
-          text: `ส่งการแจ้งเตือนทดสอบแล้ว! คุณจะเห็นข้อความเด้งขึ้นบนอุปกรณ์ (ส่งไปยัง ${res.sent || 1} อุปกรณ์)` 
+          text: `ส่งการแจ้งเตือนทดสอบสำเร็จแล้ว! แจ้งเตือนถูกส่งไปยังอุปกรณ์เรียบร้อยแล้ว (${res.sent || 1} อุปกรณ์)` 
         });
       } else {
         setPushMessage({ type: 'error', text: res.error || 'ไม่สามารถส่งการแจ้งเตือนทดสอบได้' });
@@ -396,7 +398,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
             }`}
           >
             <Radio className="w-4 h-4" />
-            <span>Web Push Notifications</span>
+            <span>Web Push (แจ้งเตือนหลัก)</span>
             {isPushSubscribed && (
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
             )}
@@ -407,12 +409,12 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
             onClick={() => setActiveTab('line')}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer ${
               activeTab === 'line'
-                ? 'liquid-glass text-emerald-600 dark:text-emerald-400 shadow-md border border-white/80 dark:border-white/20'
+                ? 'liquid-glass text-amber-600 dark:text-amber-400 shadow-md border border-white/80 dark:border-white/20'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Smartphone className="w-4 h-4" />
-            <span>LINE Bot API</span>
+            <ShoppingCart className="w-4 h-4" />
+            <span>LINE สั่งของ & ถามสต็อก</span>
             {isConfigured && (
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             )}
@@ -492,7 +494,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                 <button
                   type="button"
                   onClick={handleToggleWebPush}
-                  disabled={pushLoading || !webPushSupported || pushPermission === 'denied'}
+                  disabled={pushLoading}
                   className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs ${
                     isPushSubscribed
                       ? 'bg-rose-500 hover:bg-rose-600 text-white'
@@ -611,7 +613,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                     </div>
                   </label>
 
-                  {/* Important Requisition Alert */}
+                  {/* Stock Transactions (Stock-Out / Stock-In / Bulk) Alert */}
                   <label className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${
                     isAdmin 
                       ? 'border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700' 
@@ -628,7 +630,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                       <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5">
                           <PackageMinus className="w-3.5 h-3.5 text-blue-500" />
-                          <span>แจ้งเตือนเมื่อมีการเบิกจ่ายสำคัญ (Important Requisition Alert)</span>
+                          <span>แจ้งเตือนการเบิก-รับสินค้าทุกประเภท (Stock-In / Stock-Out / เบิกกลุ่ม)</span>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
                           webPushConfig.notifyImportantRequisition 
@@ -639,12 +641,12 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                         </span>
                       </div>
                       <p className="text-slate-500 dark:text-slate-400">
-                        ส่งเตือนเมื่อมีการเบิกจ่ายจำนวนมาก (ตั้งแต่ 5 หน่วยขึ้นไป) หรือมีวัตถุประสงค์งานสำคัญ งานด่วน งานฉุกเฉิน หรือผ่าน AI Assistant
+                        แจ้งเตือนผ่าน Web Push ทันทีทุกครั้งที่มีการเบิกอะไหล่ รับของเข้าคลัง เบิกแบบกลุ่ม หรือสั่งงานผ่าน AI (แทนที่การแจ้งเตือนเบิก-รับใน LINE)
                       </p>
                     </div>
                   </label>
 
-                  {/* Purchase Order Alert */}
+                  {/* Purchase Order & Receive Alert */}
                   <label className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${
                     isAdmin 
                       ? 'border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700' 
@@ -661,7 +663,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                       <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5">
                           <ShoppingCart className="w-3.5 h-3.5 text-amber-500" />
-                          <span>แจ้งเตือนคำสั่งซื้อสินค้า (Purchase Order Alert)</span>
+                          <span>แจ้งเตือนคำสั่งซื้อและการรับของเข้าคลัง (Purchase Order & Stock-In Alert)</span>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
                           webPushConfig.notifyPurchaseOrder !== false 
@@ -672,7 +674,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                         </span>
                       </div>
                       <p className="text-slate-500 dark:text-slate-400">
-                        ส่งเตือนเมื่อมีการส่งคำขอสั่งซื้อสินค้าใหม่ เพื่อให้เจ้าหน้าที่และแอดมินทราบทันที
+                        ส่งเตือนผ่าน Web Push เมื่อมีคำขอสั่งซื้อใหม่ เมื่อแอดมินยืนยันคำสั่งซื้อ และเมื่อรับสินค้าตามใบสั่งซื้อเข้าคลังสำเร็จ
                       </p>
                     </div>
                   </label>
@@ -757,97 +759,79 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                 </div>
               </div>
 
-              {/* NON-ADMIN USER VIEW: SUMMARY ONLY */}
+              {/* NON-ADMIN USER VIEW: SUMMARY & LINE STOCK INQUIRY COMMANDS */}
               {!isAdmin ? (
                 <div className="space-y-4">
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
                     <div className="flex items-center gap-2 font-bold text-sm text-slate-800 dark:text-white">
-                      <Lock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span>สถานะการแจ้งเตือน LINE ที่แอดมินกำหนดไว้:</span>
+                      <ShoppingCart className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <span>สถานะ LINE สั่งของ & ระบบถามสต็อกอัตโนมัติ:</span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                      ทุกครั้งที่คุณทำรายการเบิก-รับ หรือสั่งซื้ออะไหล่ ข้อมูลจะถูกส่งไปยังห้องแชท LINE ของคลังสินค้าโดยอัตโนมัติตามนโยบายที่แอดมินเปิดไว้:
+                      การแจ้งเตือนเบิก-รับทั่วไปได้ปรับไปใช้ <strong>Web Push Notification</strong> เป็นหลักแล้ว ส่วน LINE จะใช้เฉพาะ<strong>การแจ้งเตือนใบสั่งซื้อสินค้า (Purchase Order)</strong> และ<strong>การส่งข้อความถามจำนวนสต็อกสินค้า</strong>:
                     </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs">
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5 font-medium">
-                          <PackageMinus className="w-3.5 h-3.5 text-rose-500" />
-                          <span>การเบิกจ่ายสินค้า</span>
+                    <div className="grid grid-cols-1 gap-2 pt-1 text-xs">
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-300/60 dark:border-amber-700/60">
+                        <span className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
+                          <ShoppingCart className="w-4 h-4 text-amber-600" />
+                          <span>แจ้งเตือนใบสั่งซื้อสินค้าใหม่ (LINE สั่งของ)</span>
                         </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${config.notifyStockOut ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
-                          {config.notifyStockOut ? 'เปิดใช้งาน' : 'ปิด'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5 font-medium">
-                          <PackagePlus className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>การรับเข้าสินค้า</span>
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${config.notifyStockIn ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
-                          {config.notifyStockIn ? 'เปิดใช้งาน' : 'ปิด'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5 font-medium">
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                          <span>สินค้าใกล้หมดสต็อก</span>
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${config.notifyLowStock ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
-                          {config.notifyLowStock ? 'เปิดใช้งาน' : 'ปิด'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5 font-medium">
-                          <ShoppingCart className="w-3.5 h-3.5 text-amber-600" />
-                          <span>คำขอสั่งซื้อสินค้าใหม่</span>
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${config.notifyPurchaseOrder !== false ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md ${config.notifyPurchaseOrder !== false ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
                           {config.notifyPurchaseOrder !== false ? 'เปิดใช้งาน' : 'ปิด'}
                         </span>
                       </div>
-
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5 font-medium">
-                          <LogIn className="w-3.5 h-3.5 text-blue-500" />
-                          <span>เข้าสู่ระบบ (Log in)</span>
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${config.notifyLogin ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
-                          {config.notifyLogin ? 'เปิดใช้งาน' : 'ปิด'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5 font-medium">
-                          <LogOut className="w-3.5 h-3.5 text-slate-500" />
-                          <span>ออกจากระบบ (Log out)</span>
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${config.notifyLogout ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
-                          {config.notifyLogout ? 'เปิดใช้งาน' : 'ปิด'}
-                        </span>
-                      </div>
                     </div>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                    <Lock className="w-4 h-4 shrink-0 text-amber-600" />
-                    <span>การแก้ไข Token และห้องแชทปลายทาง LINE สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น</span>
+                  {/* Interactive LINE Stock Inquiry Guide for Users */}
+                  <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-300 dark:border-blue-800 rounded-2xl p-4 space-y-2.5 text-xs">
+                    <div className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-2 text-sm">
+                      <Smartphone className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      <span>💬 วิธีส่งข้อความถามจำนวนสต็อกในแชท LINE</span>
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                      คุณสามารถพิมพ์ข้อความส่งเข้าแชท LINE Bot เพื่อเช็คจำนวนคงเหลือของอะไหล่ได้ทันทีตลอด 24 ชม.:
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800/70">
+                        <div className="font-bold text-blue-700 dark:text-blue-300">🔍 เช็คสต็อกรายชิ้น</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                          พิมพ์ <code>สต็อก ท่อ PVC</code> หรือ <code>คงเหลือ หลอดไฟ</code> หรือรหัส <code>A000000104</code>
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800/70">
+                        <div className="font-bold text-rose-600 dark:text-rose-400">🚨 เช็คของหมด / ใกล้หมด</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                          พิมพ์ <code>ของหมด</code> หรือ <code>ใกล้หมด</code>
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800/70">
+                        <div className="font-bold text-indigo-600 dark:text-indigo-400">📂 เช็คตามหมวดหมู่</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                          พิมพ์ <code>หมวด แอร์</code>, <code>หมวด ไฟฟ้า</code>, <code>หมวด ท่อ</code>
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800/70">
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400">📊 ดูสรุปคลังสินค้า</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                          พิมพ์ <code>สรุปสต็อก</code> หรือ <code>คำสั่ง</code>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
-                /* ADMIN VIEW: FULL CONFIGURATION */
+                /* ADMIN VIEW: PURCHASE ORDER LINE & STOCK INQUIRY BOT CONFIGURATION */
                 <>
                   {/* Master Enable/Disable Switch */}
                   <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-300 dark:border-slate-700 flex items-center justify-between">
                     <div className="space-y-0.5">
                       <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                        เปิดระบบแจ้งเตือน LINE ทั้งหมด
+                        เปิดใช้งาน LINE สั่งของ & บอทตอบกลับสต็อก
                       </h4>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        เปิดหรือปิดการทำงานของระบบแจ้งเตือน LINE ชั่วคราว
+                        แจ้งเตือนเฉพาะใบสั่งซื้อสินค้า (Purchase Order) และเปิดให้ผู้ใช้พิมพ์ถามจำนวนสต็อกใน LINE
                       </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -858,6 +842,67 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                         className="sr-only peer"
                       />
                       <div className="w-12 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+
+                  {/* LINE Stock Inquiry Bot & Webhook URL Card */}
+                  <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-300 dark:border-blue-800 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-blue-900 dark:text-blue-200">
+                        <Smartphone className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <span>🤖 ระบบพิมพ์ถามจำนวนสต็อกผ่านแชท LINE (Stock Inquiry Bot)</span>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/30">
+                        Interactive Webhook
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      ผู้ใช้งานสามารถส่งข้อความในแชท LINE เพื่อถามยอดคงเหลือได้ทันที เช่น พิมพ์ <strong>"สต็อก ท่อ PVC"</strong>, <strong>"คงเหลือ หลอดไฟ"</strong>, <strong>"A000000104"</strong>, <strong>"ของหมด"</strong>, <strong>"ใกล้หมด"</strong>, <strong>"หมวด แอร์"</strong> หรือ <strong>"สรุปสต็อก"</strong>
+                    </p>
+
+                    <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-mono text-slate-700 dark:text-slate-300 truncate">
+                        Webhook URL: {typeof window !== 'undefined' ? `${window.location.origin}/api/line/webhook` : '/api/line/webhook'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyWebhook}
+                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>{webhookCopied ? 'คัดลอกแล้ว!' : 'คัดลอก URL'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Purchase Order Toggle (Only LINE Notification Event Kept) */}
+                  <div className="space-y-2 pt-1">
+                    <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl border border-amber-300 dark:border-amber-700/80 bg-amber-50/70 dark:bg-amber-950/30 cursor-pointer hover:border-amber-400 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={config.notifyPurchaseOrder ?? true}
+                          onChange={(e) => setConfig({ ...config, notifyPurchaseOrder: e.target.checked })}
+                          className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4"
+                        />
+                        <div className="text-xs">
+                          <div className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                            <ShoppingCart className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                            <span>แจ้งเตือนคำขอสั่งซื้อสินค้าใหม่ (LINE สั่งของ - Purchase Order Only)</span>
+                          </div>
+                          <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                            ส่งการ์ดใบสั่งซื้อพร้อมปุ่มยืนยันทันทีใน LINE (การแจ้งเตือนเบิก-รับทั่วไปถูกย้ายไปที่ Web Push ทั้งหมดแล้ว)
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md shrink-0 ${
+                        config.notifyPurchaseOrder !== false
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                      }`}>
+                        {config.notifyPurchaseOrder !== false ? 'เปิดใช้งาน' : 'ปิด'}
+                      </span>
                     </label>
                   </div>
 
@@ -888,15 +933,6 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                           {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-
-                      {config.channelAccessToken && !config.channelAccessToken.includes('...') && config.channelAccessToken.length < 60 && (
-                        <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-lg border border-amber-200 dark:border-amber-800/60">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          <span>
-                            ข้อสังเกต: Token ที่กรอกดูสั้นเกินไป ({config.channelAccessToken.length} ตัวอักษร) กรุณาตรวจสอบว่าคัดลอก <strong>"Channel access token (long-lived)"</strong> จากแท็บ <strong>Messaging API</strong>
-                          </span>
-                        </p>
-                      )}
                     </div>
 
                     {/* Destination ID */}
@@ -904,7 +940,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                       <label className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
                           <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                          Destination ID (User ID หรือ Group ID) <span className="text-red-500">*</span>
+                          Destination ID หลัก (User ID หรือ Group ID) <span className="text-red-500">*</span>
                         </span>
                         <span className="text-[11px] font-normal text-slate-400">เป้าหมายส่งข้อความ</span>
                       </label>
@@ -915,117 +951,6 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                         placeholder="เช่น U12345678... หรือ C12345678..."
                         className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-800 dark:text-white font-mono focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-colors shadow-2xs"
                       />
-                      <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                        ขึ้นต้นด้วย <strong>U</strong> สำหรับแชทส่วนตัว, <strong>C</strong> หรือ <strong>R</strong> สำหรับกลุ่มห้องแชท
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Event Notification Toggles */}
-                  <div className="space-y-3 pt-2">
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>เลือกเหตุการณ์ที่ต้องการให้ส่งแจ้งเตือน LINE:</span>
-                    </h4>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={config.notifyStockOut}
-                          onChange={(e) => setConfig({ ...config, notifyStockOut: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <div className="text-xs">
-                          <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                            <PackageMinus className="w-3.5 h-3.5 text-rose-500" />
-                            <span>การเบิกจ่ายสินค้า (Stock-Out)</span>
-                          </div>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={config.notifyStockIn}
-                          onChange={(e) => setConfig({ ...config, notifyStockIn: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <div className="text-xs">
-                          <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                            <PackagePlus className="w-3.5 h-3.5 text-emerald-500" />
-                            <span>การรับเข้าสินค้า (Stock-In)</span>
-                          </div>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={config.notifyLowStock}
-                          onChange={(e) => setConfig({ ...config, notifyLowStock: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <div className="text-xs">
-                          <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                            <span>สินค้าใกล้หมด/หมดสต็อก</span>
-                          </div>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={config.notifyLogin}
-                          onChange={(e) => setConfig({ ...config, notifyLogin: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <div className="text-xs">
-                          <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                            <LogIn className="w-3.5 h-3.5 text-blue-500" />
-                            <span>เข้าสู่ระบบ (Log in)</span>
-                          </div>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                            แจ้งเตือนเมื่อมีผู้ใช้ล็อกอิน
-                          </span>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/60 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={config.notifyLogout}
-                          onChange={(e) => setConfig({ ...config, notifyLogout: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <div className="text-xs">
-                          <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                            <LogOut className="w-3.5 h-3.5 text-slate-500" />
-                            <span>ออกจากระบบ (Log out)</span>
-                          </div>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                            แจ้งเตือนเมื่อผู้ใช้ล็อกเอาท์
-                          </span>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/30 cursor-pointer hover:border-amber-400 dark:hover:border-amber-600 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={config.notifyPurchaseOrder ?? true}
-                          onChange={(e) => setConfig({ ...config, notifyPurchaseOrder: e.target.checked })}
-                          className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4"
-                        />
-                        <div className="text-xs">
-                          <div className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                            <ShoppingCart className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                            <span>สั่งซื้อสินค้าใหม่ (Purchase Order)</span>
-                          </div>
-                          <span className="text-[10px] text-amber-700 dark:text-amber-300">
-                            พร้อมปุ่มยืนยันคำสั่งซื้อทันทีใน LINE
-                          </span>
-                        </div>
-                      </label>
                     </div>
                   </div>
 

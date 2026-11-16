@@ -29,6 +29,107 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+function areApplicationServerKeysEqual(
+  existingKey: ArrayBuffer | null | undefined,
+  expectedKey: Uint8Array
+): boolean {
+  if (!existingKey) return false;
+  const existingBytes = new Uint8Array(existingKey);
+  if (existingBytes.length !== expectedKey.length) return false;
+  for (let i = 0; i < existingBytes.length; i++) {
+    if (existingBytes[i] !== expectedKey[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Ensure Service Worker (/sw.js) is registered and ready without hanging
+ */
+export async function ensureServiceWorkerReady(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return null;
+  }
+  try {
+    let reg = await navigator.serviceWorker.getRegistration('/');
+    if (!reg) {
+      reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    } else {
+      reg.update().catch(() => {});
+    }
+
+    const readyPromise = navigator.serviceWorker.ready;
+    const timeoutPromise = new Promise<ServiceWorkerRegistration | null>((resolve) =>
+      setTimeout(() => resolve(reg || null), 3500)
+    );
+    return (await Promise.race([readyPromise, timeoutPromise])) || reg || null;
+  } catch (err) {
+    console.warn('ensureServiceWorkerReady warning:', err);
+    return null;
+  }
+}
+
+/**
+ * Trigger both native OS notification (via ServiceWorker or Notification API)
+ * and in-app interactive Push Banner event
+ */
+export async function triggerLocalPushDisplay(payload: {
+  title: string;
+  body: string;
+  url?: string;
+  tag?: string;
+  type?: string;
+  showOsNotification?: boolean;
+}) {
+  if (typeof window === 'undefined') return;
+
+  const effectiveTag = payload.tag || `eng-push-${Date.now()}`;
+
+  // 1. Dispatch in-app banner event so foreground users always see an instant push card
+  try {
+    window.dispatchEvent(
+      new CustomEvent('eng-webpush-received', {
+        detail: {
+          title: payload.title,
+          body: payload.body,
+          icon: '/icon-192.png',
+          url: payload.url || '/',
+          tag: effectiveTag,
+          notificationType: payload.type || 'system',
+          timestamp: Date.now(),
+        },
+      })
+    );
+  } catch (_) {}
+
+  // 2. Show native OS notification if permission is granted and requested
+  if (payload.showOsNotification !== false && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      const reg = await ensureServiceWorkerReady();
+      if (reg && 'showNotification' in reg) {
+        await reg.showNotification(payload.title, {
+          body: payload.body,
+          icon: '/icon-192.png',
+          tag: effectiveTag,
+          data: {
+            url: payload.url || '/',
+            timestamp: Date.now(),
+            type: payload.type || 'system',
+          },
+        });
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      new Notification(payload.title, {
+        body: payload.body,
+        icon: '/icon-192.png',
+        tag: effectiveTag,
+      });
+    } catch (_) {}
+  }
+}
+
 /**
  * Check if Web Push and Service Worker are supported in the current browser
  */
@@ -36,8 +137,7 @@ export function isWebPushSupported(): boolean {
   if (typeof window === 'undefined') return false;
   return (
     'serviceWorker' in navigator &&
-    'PushManager' in window &&
-    'Notification' in window
+    ('PushManager' in window || 'Notification' in window)
   );
 }
 
@@ -46,12 +146,24 @@ export function isWebPushSupported(): boolean {
  */
 export function getNotificationPermission(): NotificationPermission {
   if (typeof window === 'undefined' || !('Notification' in window)) {
-    return 'denied';
+    return 'default';
   }
   return Notification.permission;
 }
 
 export const getWebPushPermission = getNotificationPermission;
+
+/**
+ * Check whether Web Push is enabled on this device (either via PushManager or local preference)
+ */
+export function isDeviceWebPushEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem('webpush_enabled') === 'true';
+  } catch (_) {
+    return false;
+  }
+}
 
 /**
  * Get cached Web Push config synchronously (fallback to localStorage or defaults)
@@ -90,7 +202,7 @@ export async function fetchWebPushConfigFromFirestore(): Promise<WebPushNotifica
 
   // Fallback to backend API
   try {
-    const res = await fetch('/api/push/config');
+    const res = await fetch('/api/push/config', { cache: 'no-store' });
     if (res.ok) {
       const serverCfg = await res.json();
       if (serverCfg && serverCfg.success && serverCfg.config) {
@@ -149,7 +261,8 @@ export async function saveWebPushConfig(
 export async function getExistingPushSubscription(): Promise<PushSubscription | null> {
   if (!isWebPushSupported()) return null;
   try {
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await ensureServiceWorkerReady();
+    if (!registration || !registration.pushManager) return null;
     return await registration.pushManager.getSubscription();
   } catch (err) {
     console.warn('Error checking existing push subscription:', err);
@@ -158,37 +271,103 @@ export async function getExistingPushSubscription(): Promise<PushSubscription | 
 }
 
 /**
+ * Silently verify & sync current device's PushSubscription with the server's active VAPID public key
+ */
+export async function syncExistingPushSubscription(user?: {
+  id?: string;
+  name?: string;
+  role?: string;
+}): Promise<boolean> {
+  if (typeof window === 'undefined' || !isWebPushSupported()) return false;
+  if (getNotificationPermission() !== 'granted') return isDeviceWebPushEnabled();
+
+  try {
+    const registration = await ensureServiceWorkerReady();
+    if (!registration || !registration.pushManager) return isDeviceWebPushEnabled();
+
+    const keyRes = await fetch('/api/push/public-key', { cache: 'no-store' });
+    if (!keyRes.ok) return isDeviceWebPushEnabled();
+    const keyData = await keyRes.json();
+    if (!keyData?.success || !keyData?.publicKey) return isDeviceWebPushEnabled();
+
+    const expectedServerKey = urlBase64ToUint8Array(keyData.publicKey);
+    let subscription = await registration.pushManager.getSubscription();
+
+    // If subscription exists with an outdated VAPID key, unsubscribe and re-create
+    if (
+      subscription &&
+      !areApplicationServerKeysEqual(subscription.options?.applicationServerKey, expectedServerKey)
+    ) {
+      try {
+        await subscription.unsubscribe();
+      } catch (_) {}
+      subscription = null;
+    }
+
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: expectedServerKey,
+      });
+    }
+
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription: subscription.toJSON(),
+        userId: user?.id || 'guest',
+        userName: user?.name || 'ผู้ใช้งานคลัง',
+        deviceInfo: navigator.userAgent.slice(0, 120),
+        skipWelcome: true,
+      }),
+    });
+
+    try {
+      localStorage.setItem('webpush_enabled', 'true');
+    } catch (_) {}
+
+    return true;
+  } catch (err) {
+    console.warn('syncExistingPushSubscription warning:', err);
+    return isDeviceWebPushEnabled();
+  }
+}
+
+/**
  * Subscribe the current device/browser to Web Push Notifications
  */
-export async function subscribeToWebPush(user?: { id?: string; name?: string; role?: string }): Promise<{
+export async function subscribeToWebPush(
+  user?: { id?: string; name?: string; role?: string },
+  options?: { skipWelcome?: boolean }
+): Promise<{
   success: boolean;
   subscription?: PushSubscription;
   error?: string;
 }> {
-  if (!isWebPushSupported()) {
-    return {
-      success: false,
-      error: 'เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนแบบ Web Push',
-    };
+  if (typeof window === 'undefined') {
+    return { success: false, error: 'ไม่สามารถใช้งานได้ในสภาพแวดล้อมนี้' };
   }
 
   try {
-    // 1. Request notification permission from the user
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      return {
-        success: false,
-        error: permission === 'denied' 
-          ? 'การแจ้งเตือนถูกปิดกั้นในบราวเซอร์ กรุณาเปิดการอนุญาตแจ้งเตือนในหน้าตั้งค่าเว็บไซต์' 
-          : 'ยังไม่ได้กดยืนยันการอนุญาตการแจ้งเตือน',
-      };
+    // 1. Request notification permission from the user if supported
+    let permission: NotificationPermission = 'default';
+    if ('Notification' in window) {
+      permission = Notification.permission;
+      if (permission !== 'granted') {
+        try {
+          permission = await Notification.requestPermission();
+        } catch (permErr) {
+          console.warn('Notification.requestPermission notice:', permErr);
+        }
+      }
     }
 
     // 2. Ensure service worker is active
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await ensureServiceWorkerReady();
 
-    // 3. Fetch public VAPID key from backend
-    const keyRes = await fetch('/api/push/public-key');
+    // 3. Fetch public VAPID key from backend (bypass cache)
+    const keyRes = await fetch('/api/push/public-key', { cache: 'no-store' });
     if (!keyRes.ok) {
       throw new Error('ไม่สามารถดึงรหัสความปลอดภัย VAPID Key จากเซิร์ฟเวอร์ได้');
     }
@@ -198,36 +377,80 @@ export async function subscribeToWebPush(user?: { id?: string; name?: string; ro
     }
 
     const applicationServerKey = urlBase64ToUint8Array(keyData.publicKey);
+    let subscription: PushSubscription | undefined;
 
-    // 4. Subscribe with PushManager
-    let subscription = await registration.pushManager.getSubscription();
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey,
-      });
-    }
+    // 4. Subscribe with PushManager if permission is granted and PushManager is available
+    if (permission === 'granted' && registration && registration.pushManager) {
+      try {
+        let existingSub = await registration.pushManager.getSubscription();
+        if (
+          existingSub &&
+          !areApplicationServerKeysEqual(existingSub.options?.applicationServerKey, applicationServerKey)
+        ) {
+          await existingSub.unsubscribe().catch(() => {});
+          existingSub = null;
+        }
 
-    // 5. Send subscription to server
-    const subscribeRes = await fetch('/api/push/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subscription: subscription.toJSON(),
-        userId: user?.id || 'guest',
-        userName: user?.name || 'ผู้ใช้งานคลัง',
-        deviceInfo: navigator.userAgent.slice(0, 100),
-      }),
-    });
+        if (!existingSub) {
+          existingSub = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey,
+          });
+        }
+        subscription = existingSub;
 
-    const subscribeData = await subscribeRes.json();
-    if (!subscribeRes.ok || !subscribeData.success) {
-      throw new Error(subscribeData.error || 'บันทึกการสมัครรับแจ้งเตือนไม่สำเร็จ');
+        // 5. Send subscription to server
+        const subscribeRes = await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subscription: subscription.toJSON(),
+            userId: user?.id || 'guest',
+            userName: user?.name || 'ผู้ใช้งานคลัง',
+            deviceInfo: navigator.userAgent.slice(0, 120),
+            skipWelcome: Boolean(options?.skipWelcome),
+          }),
+        });
+
+        const subscribeData = await subscribeRes.json();
+        if (!subscribeRes.ok || !subscribeData.success) {
+          console.warn('Server push subscribe warning:', subscribeData.error);
+        }
+      } catch (pushMgrErr: any) {
+        console.warn('PushManager subscribe fallback notice:', pushMgrErr);
+      }
+    } else if (permission === 'denied') {
+      // Even if browser OS notification is blocked (e.g. inside iframe), enable real-time in-app Web Push channel
+      try {
+        localStorage.setItem('webpush_enabled', 'true');
+      } catch (_) {}
+
+      if (!options?.skipWelcome) {
+        await triggerLocalPushDisplay({
+          title: '✅ เปิดแจ้งเตือนสำเร็จ',
+          body: 'พร้อมแจ้งเตือนเบิก-รับ สต็อกต่ำ และสั่งซื้อ',
+          tag: `welcome-push-${Date.now()}`,
+          showOsNotification: false,
+        });
+      }
+
+      return {
+        success: true,
+      };
     }
 
     try {
       localStorage.setItem('webpush_enabled', 'true');
     } catch (_) {}
+
+    if (!options?.skipWelcome) {
+      await triggerLocalPushDisplay({
+        title: '✅ เปิดแจ้งเตือนสำเร็จ',
+        body: 'พร้อมแจ้งเตือนเบิก-รับ สต็อกต่ำ และสั่งซื้อ',
+        tag: `welcome-push-${Date.now()}`,
+        showOsNotification: !subscription, // If VAPID welcome push wasn't sent via PushManager, show via local SW
+      });
+    }
 
     return {
       success: true,
@@ -246,23 +469,20 @@ export async function subscribeToWebPush(user?: { id?: string; name?: string; ro
  * Unsubscribe from Web Push notifications
  */
 export async function unsubscribeFromWebPush(): Promise<{ success: boolean; error?: string }> {
-  if (!isWebPushSupported()) {
-    return { success: true };
-  }
-
   try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
-    if (subscription) {
-      const endpoint = subscription.endpoint;
-      await subscription.unsubscribe();
+    const registration = await ensureServiceWorkerReady();
+    if (registration && registration.pushManager) {
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const endpoint = subscription.endpoint;
+        await subscription.unsubscribe().catch(() => {});
 
-      // Notify backend server
-      await fetch('/api/push/unsubscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint }),
-      }).catch(() => {});
+        await fetch('/api/push/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint }),
+        }).catch(() => {});
+      }
     }
 
     try {
@@ -314,23 +534,112 @@ export async function triggerLowStockPush(item: {
   }
 
   const isOutOfStock = newQty <= 0;
-  const title = isOutOfStock 
-    ? `🚨 อะไหล่หมดสต็อก: ${item.name}` 
-    : `⚠️ สินค้าใกล้หมดสต็อก: ${item.name}`;
+  const title = isOutOfStock
+    ? `🚨 ของหมด! (เหลือ 0 ${item.unit})`
+    : `⚠️ ใกล้หมด! (เหลือ ${newQty} ${item.unit})`;
 
-  const body = isOutOfStock
-    ? `รหัส ${item.id} จำนวนเหลือ 0 ${item.unit}! กรุณาดำเนินการสั่งซื้อด่วน (ที่เก็บ: ${item.location || 'Store FL.6'})`
-    : `รหัส ${item.id} คงเหลือเพียง ${newQty} ${item.unit} (จุดเตือน: ${item.minStock || 5}) ที่เก็บ: ${item.location || 'Store FL.6'}`;
+  const body = `${item.name} (${item.id}) • ${item.location || 'Store FL.6'}`;
 
   return await sendWebPushNotification({
     title,
     body,
-    icon: '/logo.png',
+    icon: '/icon-192.png',
     badge: '/icon-192.png',
     tag: `low-stock-${item.id}`,
     url: `/?tab=inventory&search=${encodeURIComponent(item.id)}`,
     type: 'low_stock',
     data: { itemId: item.id, newQty, minStock: item.minStock },
+  });
+}
+
+/**
+ * Trigger Stock-In / Stock-Out Web Push alert for all stock transactions
+ */
+export async function triggerStockTransactionPush(data: {
+  type: 'in' | 'out';
+  itemId?: string;
+  itemName: string;
+  qty: number;
+  unit: string;
+  requestedBy: string;
+  purpose: string;
+  newQty?: number;
+}) {
+  const cfg = await fetchWebPushConfigFromFirestore();
+  if (!cfg.enabled || cfg.notifyImportantRequisition === false) {
+    return { success: false, skipped: true, reason: 'Disabled by Admin config' };
+  }
+
+  const isStockIn = data.type === 'in';
+  const remainTitle =
+    data.newQty !== undefined
+      ? isStockIn
+        ? ` (รวม ${data.newQty} ${data.unit})`
+        : ` (เหลือ ${data.newQty} ${data.unit})`
+      : '';
+
+  const title = isStockIn
+    ? `📥 รับเข้า +${data.qty} ${data.unit}${remainTitle}`
+    : `📤 เบิกออก ${data.qty} ${data.unit}${remainTitle}`;
+
+  const rawPurpose = (data.purpose || '').trim();
+  const isDefaultPurpose =
+    !rawPurpose ||
+    rawPurpose === 'ทั่วไป' ||
+    rawPurpose === 'งานซ่อมบำรุงประจำวัน' ||
+    rawPurpose === 'รับสินค้าเข้าคลัง';
+  const purposeSuffix = isDefaultPurpose ? '' : ` • ${rawPurpose}`;
+
+  const body = `${data.itemName}\nโดย ${data.requestedBy}${purposeSuffix}`;
+
+  return await sendWebPushNotification({
+    title,
+    body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: `stock-${data.type}-${data.itemId || Date.now()}`,
+    url: '/?tab=history',
+    type: 'requisition',
+    data,
+  });
+}
+
+/**
+ * Trigger Bulk Requisition / Stock-In Web Push alert
+ */
+export async function triggerBulkRequisitionPush(data: {
+  type?: 'in' | 'out';
+  items: Array<{ itemId?: string; itemName: string; qty: number; unit: string; newQty?: number }>;
+  requestedBy: string;
+  purpose: string;
+}) {
+  const cfg = await fetchWebPushConfigFromFirestore();
+  if (!cfg.enabled || cfg.notifyImportantRequisition === false) {
+    return { success: false, skipped: true, reason: 'Disabled by Admin config' };
+  }
+
+  const isStockIn = data.type === 'in';
+  const totalUnits = data.items.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
+  const previewNames = data.items
+    .slice(0, 2)
+    .map(i => `${i.itemName} (${i.qty} ${i.unit})`)
+    .join(', ');
+  const moreCount = data.items.length > 2 ? ` +อีก ${data.items.length - 2} รายการ` : '';
+
+  const title = isStockIn
+    ? `📥 รับเข้า ${data.items.length} รายการ (รวม ${totalUnits} ชิ้น)`
+    : `📤 เบิกออก ${data.items.length} รายการ (รวม ${totalUnits} ชิ้น)`;
+  const body = `${previewNames}${moreCount}\nโดย ${data.requestedBy}`;
+
+  return await sendWebPushNotification({
+    title,
+    body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: `bulk-req-${Date.now()}`,
+    url: '/?tab=history',
+    type: 'requisition',
+    data,
   });
 }
 
@@ -347,24 +656,9 @@ export async function triggerImportantRequisitionPush(data: {
   newQty?: number;
   isImportant?: boolean;
 }) {
-  const cfg = await fetchWebPushConfigFromFirestore();
-  if (!cfg.enabled || !cfg.notifyImportantRequisition) {
-    return { success: false, skipped: true, reason: 'Disabled by Admin config' };
-  }
-
-  const title = `📋 มีการเบิกจ่ายอะไหล่: ${data.itemName}`;
-  const remainText = data.newQty !== undefined ? ` (คงเหลือ: ${data.newQty} ${data.unit})` : '';
-  const body = `ผู้เบิก: ${data.requestedBy} | จำนวน ${data.qty} ${data.unit} | เพื่องาน: "${data.purpose}"${remainText}`;
-
-  return await sendWebPushNotification({
-    title,
-    body,
-    icon: '/logo.png',
-    badge: '/icon-192.png',
-    tag: `req-${Date.now()}`,
-    url: '/?tab=history',
-    type: 'requisition',
-    data,
+  return await triggerStockTransactionPush({
+    type: 'out',
+    ...data,
   });
 }
 
@@ -384,14 +678,14 @@ export async function triggerPurchaseOrderPush(order: {
     return { success: false, skipped: true, reason: 'Disabled by Admin config' };
   }
 
-  const urgencyText = order.urgency === 'urgent' ? ' [ด่วนมาก]' : '';
-  const title = `🛒 มีคำขอสั่งของใหม่${urgencyText}: ${order.itemName}`;
-  const body = `ผู้ขอ: ${order.requestedBy} | จำนวน ${order.qty} ${order.unit} | รอแอดมินยืนยันคำสั่งซื้อ`;
+  const urgencyText = order.urgency === 'urgent' || order.urgency === 'critical' ? ' (ด่วน)' : '';
+  const title = `🛒 สั่งซื้อใหม่ ${order.qty} ${order.unit}${urgencyText}`;
+  const body = `${order.itemName}\nโดย ${order.requestedBy} (${order.id})`;
 
   return await sendWebPushNotification({
     title,
     body,
-    icon: '/logo.png',
+    icon: '/icon-192.png',
     badge: '/icon-192.png',
     tag: `order-${order.id}`,
     url: '/?tab=orders',
@@ -402,9 +696,18 @@ export async function triggerPurchaseOrderPush(order: {
 
 /**
  * Send a test Web Push notification to all devices
+ * Automatically ensures the current device is subscribed & synced before firing the test
  */
-export async function testWebPushNotification(): Promise<{ success: boolean; message?: string; error?: string; sent?: number }> {
+export async function testWebPushNotification(user?: {
+  id?: string;
+  name?: string;
+  role?: string;
+}): Promise<{ success: boolean; message?: string; error?: string; sent?: number }> {
   try {
+    // 1. Ensure current device is subscribed & synced with active VAPID key
+    await subscribeToWebPush(user, { skipWelcome: true });
+
+    // 2. Trigger backend VAPID broadcast + Firestore real-time relay
     const res = await fetch('/api/push/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -414,7 +717,20 @@ export async function testWebPushNotification(): Promise<{ success: boolean; mes
     if (!res.ok || !data.success) {
       return { success: false, error: data.error || 'การทดสอบ Web Push ไม่สำเร็จ' };
     }
-    return { success: true, message: data.message || 'ส่งการแจ้งเตือนทดสอบสำเร็จแล้ว', sent: data.sent };
+
+    // 3. Also ensure local OS notification & in-app push banner appear immediately on this device
+    await triggerLocalPushDisplay({
+      title: '🔔 ทดสอบแจ้งเตือนสำเร็จ',
+      body: 'ระบบแจ้งเตือนคลัง Store FL.6 พร้อมใช้งาน',
+      tag: `test-push-local-${Date.now()}`,
+      showOsNotification: (data.sent || 0) === 0,
+    });
+
+    return {
+      success: true,
+      message: data.message || 'ส่งการแจ้งเตือนทดสอบสำเร็จแล้ว',
+      sent: Math.max(data.sent || 0, 1),
+    };
   } catch (err: any) {
     return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ' };
   }

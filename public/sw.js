@@ -1,8 +1,8 @@
 // ============================================================================
-// ENG SMART STORE PWA Service Worker (V3 - Enhanced Offline & Push Engine)
+// ENG SMART STORE PWA Service Worker (V5 - Clean & Concise Web Push Engine)
 // ============================================================================
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v5';
 const STATIC_CACHE = `eng-store-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `eng-store-runtime-${CACHE_VERSION}`;
 const API_CACHE = `eng-store-api-${CACHE_VERSION}`;
@@ -32,9 +32,9 @@ const STATIC_ASSETS = [
 // 1. Installation: Resilient pre-caching of application shell & static assets
 // ============================================================================
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(STATIC_CACHE).then(async (cache) => {
-      // Use individual caching with allSettled so one missing asset doesn't abort the whole install
       const cachePromises = STATIC_ASSETS.map(async (url) => {
         try {
           const req = new Request(url, { cache: 'reload' });
@@ -47,7 +47,7 @@ self.addEventListener('install', (event) => {
         }
       });
       await Promise.allSettled(cachePromises);
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
@@ -75,6 +75,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
+  // 3.0 Never cache Service Worker script or Web Push / Order / Auth APIs
+  if (
+    url.pathname === '/sw.js' ||
+    url.pathname.startsWith('/api/push') ||
+    url.pathname.startsWith('/api/orders') ||
+    url.pathname.startsWith('/api/auth') ||
+    url.pathname.startsWith('/api/line/webhook') ||
+    url.pathname.startsWith('/api/line/test') ||
+    url.pathname.startsWith('/api/line/notify') ||
+    url.pathname.startsWith('/api/health')
+  ) {
+    return;
+  }
+
   // 3.1 Non-GET requests & WebSockets & Real-time AI bypass caching
   if (
     event.request.method !== 'GET' ||
@@ -82,7 +96,6 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/api/chat') ||
     url.pathname.startsWith('/api/analyze')
   ) {
-    // If user is offline and makes a POST/PUT/DELETE request, return offline JSON error
     if (event.request.method !== 'GET') {
       event.respondWith(
         fetch(event.request).catch(() => {
@@ -114,11 +127,9 @@ self.addEventListener('fetch', (event) => {
           return networkResponse;
         })
         .catch(async () => {
-          // Offline navigation fallback: serve cached index.html
           const cachedIndex = (await caches.match('/index.html')) || (await caches.match('/'));
           if (cachedIndex) return cachedIndex;
 
-          // Ultimate offline fallback page if cache is empty
           return new Response(
             `<!DOCTYPE html>
             <html lang="th">
@@ -151,9 +162,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3.3 Read-Only Inventory & Config APIs (GET /api/inventory, GET /api/line/config)
-  // Strategy: Network-First with Cache Fallback for seamless offline viewing
-  if (url.pathname.startsWith('/api/inventory') || url.pathname.startsWith('/api/line/config')) {
+  // 3.3 Read-Only APIs (GET /api/*) -> Always Network-First with Cache Fallback
+  if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request)
         .then((networkResponse) => {
@@ -168,7 +178,6 @@ self.addEventListener('fetch', (event) => {
           if (cachedResponse) {
             return cachedResponse;
           }
-          // Return safe empty JSON structure so client parser doesn't break
           return new Response(
             JSON.stringify({
               items: [],
@@ -231,7 +240,6 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 3.6 Vite Script & Style Bundles (/assets/*, .js, .css, @vite modules)
-  // Strategy: Stale-While-Revalidate so app boots instantly from cache offline
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)
@@ -277,32 +285,73 @@ self.addEventListener('push', (event) => {
     try {
       data = event.data.json();
     } catch (e) {
-      data = { title: 'ENG Smart Store แจ้งเตือน', body: event.data.text() };
+      data = { title: 'แจ้งเตือนคลัง Store FL.6', body: event.data.text() };
     }
   }
 
-  const title = data.title || '🚨 ENG Smart Store แจ้งเตือน';
-  const options = {
-    body: data.body || 'มีการแจ้งเตือนใหม่จากระบบคลังสินค้า Store FL.6',
-    icon: data.icon || '/logo.png',
-    badge: data.badge || '/icon-192.png',
-    data: {
-      url: data.url || '/',
-      timestamp: Date.now(),
-      type: data.type || 'general',
-      extra: data.data || {}
-    },
-    tag: data.tag || `eng-push-${Date.now()}`,
-    renotify: true,
-    vibrate: [300, 100, 300, 100, 300],
-    requireInteraction: true,
-    actions: [
-      { action: 'open', title: '🔍 เปิดดูระบบ' },
-      { action: 'close', title: 'ปิด' }
-    ]
+  const title = data.title || '🔔 แจ้งเตือนคลัง Store FL.6';
+  const rawTag = data.tag || `eng-push-${Date.now()}`;
+  // Ensure test/welcome notifications always generate a fresh OS popup banner
+  const effectiveTag =
+    rawTag === 'test-push' || rawTag === 'welcome-push'
+      ? `${rawTag}-${Date.now()}`
+      : rawTag;
+
+  const notificationData = {
+    url: data.url || '/',
+    timestamp: Date.now(),
+    type: data.type || 'general',
+    extra: data.data || {}
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  const fullOptions = {
+    body: data.body || 'มีรายการอัปเดตในคลัง Store FL.6',
+    icon: data.icon || '/icon-192.png',
+    data: notificationData,
+    tag: effectiveTag,
+    renotify: true,
+    vibrate: [200, 100, 200],
+    requireInteraction: false
+  };
+
+  const fallbackOptions = {
+    body: fullOptions.body,
+    icon: '/icon-192.png',
+    tag: effectiveTag,
+    data: notificationData,
+  };
+
+  const showNotificationPromise = self.registration
+    .showNotification(title, fullOptions)
+    .catch((err) => {
+      console.warn('[SW] Full showNotification failed, falling back to basic options:', err);
+      return self.registration.showNotification(title, fallbackOptions);
+    });
+
+  // Also broadcast to any open client windows so in-app banner & sound alert fire immediately
+  const notifyClientsPromise = self.clients
+    .matchAll({ type: 'window', includeUncontrolled: true })
+    .then((windowClients) => {
+      for (const client of windowClients) {
+        try {
+          client.postMessage({
+            type: 'WEB_PUSH_RECEIVED',
+            payload: {
+              title,
+              body: fullOptions.body,
+              icon: fullOptions.icon,
+              url: notificationData.url,
+              tag: effectiveTag,
+              notificationType: notificationData.type,
+              timestamp: notificationData.timestamp,
+            }
+          });
+        } catch (_) {}
+      }
+    })
+    .catch(() => {});
+
+  event.waitUntil(Promise.all([showNotificationPromise, notifyClientsPromise]));
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -315,17 +364,17 @@ self.addEventListener('notificationclick', (event) => {
   const targetUrl = (event.notification.data && event.notification.data.url) || '/';
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
       for (const client of windowClients) {
         if (client.url && 'focus' in client) {
           if ('navigate' in client && targetUrl !== '/') {
-            client.navigate(targetUrl);
+            client.navigate(targetUrl).catch(() => {});
           }
           return client.focus();
         }
       }
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
       }
     })
   );
@@ -333,22 +382,41 @@ self.addEventListener('notificationclick', (event) => {
 
 self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
-    self.registration.pushManager.subscribe(event.oldSubscription.options)
-      .then((subscription) => {
-        return fetch('/api/push/subscribe', {
+    (async () => {
+      try {
+        let applicationServerKey = event.oldSubscription?.options?.applicationServerKey;
+        if (!applicationServerKey) {
+          const keyRes = await fetch('/api/push/public-key', { cache: 'no-store' });
+          const keyData = await keyRes.json();
+          if (keyData?.publicKey) {
+            const padding = '='.repeat((4 - (keyData.publicKey.length % 4)) % 4);
+            const base64 = (keyData.publicKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+              outputArray[i] = rawData.charCodeAt(i);
+            }
+            applicationServerKey = outputArray;
+          }
+        }
+        const subscription = await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+        await fetch('/api/push/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ subscription })
         });
-      })
-      .catch((err) => {
+      } catch (err) {
         console.warn('[SW] pushsubscriptionchange re-subscription failed:', err);
-      })
+      }
+    })()
   );
 });
 
 // ============================================================================
-// 5. Client Messages: Skip Waiting & Version Handshake
+// 5. Client Messages: Skip Waiting, Local Notification & Version Handshake
 // ============================================================================
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
@@ -356,5 +424,11 @@ self.addEventListener('message', (event) => {
   }
   if (event.data && event.data.type === 'GET_VERSION') {
     event.ports[0]?.postMessage({ version: CACHE_VERSION });
+  }
+  if (event.data && event.data.type === 'SHOW_LOCAL_NOTIFICATION') {
+    const { title, options } = event.data;
+    if (title) {
+      self.registration.showNotification(title, options || {}).catch(() => {});
+    }
   }
 });

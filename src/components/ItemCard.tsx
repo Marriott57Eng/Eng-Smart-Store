@@ -251,7 +251,7 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
         </div>
 
         {/* Item Name */}
-        <h3 className="font-bold text-slate-900 dark:text-slate-100 text-[15px] sm:text-base leading-snug line-clamp-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        <h3 className="font-extrabold text-slate-900 dark:text-slate-100 text-base sm:text-[17px] leading-snug line-clamp-2 break-words group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
           {item.name}
         </h3>
 
@@ -285,12 +285,12 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
       {/* Bottom Action & Telemetry Bar: Large Tabular Stock + 1-Click Quick Actions */}
       <div className="flex items-end justify-between pt-2.5 mt-2.5 border-t border-slate-100 dark:border-slate-800/90 gap-2">
         {/* Left: High-Contrast Stock Counter */}
-        <div className="flex items-baseline gap-1.5 min-w-0">
-          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">คงเหลือ</span>
-          <span className={`font-mono font-black text-xl sm:text-2xl tabular-nums tracking-tight leading-none ${statusConfig.qtyColor}`}>
+        <div className="flex items-baseline gap-1.5 min-w-0 flex-wrap">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">คงเหลือ</span>
+          <span className={`font-mono font-black text-2xl sm:text-[26px] tabular-nums tracking-tight leading-none ${statusConfig.qtyColor}`}>
             {item.qty.toLocaleString()}
           </span>
-          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 truncate">
+          <span className="text-sm font-bold text-slate-700 dark:text-slate-300 shrink-0">
             {item.unit}
           </span>
         </div>

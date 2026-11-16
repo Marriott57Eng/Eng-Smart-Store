@@ -931,8 +931,8 @@ export const createPurchaseOrderFlexMessage = (data: {
             type: 'text',
             text: order.itemName,
             weight: 'bold',
-            size: 'lg',
-            color: '#1E293B',
+            size: 'xl',
+            color: '#0F172A',
             wrap: true,
           },
           // Item Code & Category
@@ -943,18 +943,12 @@ export const createPurchaseOrderFlexMessage = (data: {
             contents: [
               {
                 type: 'text',
-                text: `รหัส: ${order.itemId}`,
+                text: `รหัส: ${order.itemId}${order.category ? ` • หมวด: ${order.category}` : ''}`,
                 size: 'xs',
-                color: '#64748B',
-                flex: 0,
+                color: '#475569',
+                weight: 'bold',
+                wrap: true,
               },
-              ...(order.category ? [{
-                type: 'text',
-                text: ` • หมวด: ${order.category}`,
-                size: 'xs',
-                color: '#64748B',
-                flex: 1,
-              }] : []),
             ],
           },
           {
@@ -968,13 +962,16 @@ export const createPurchaseOrderFlexMessage = (data: {
             layout: 'horizontal',
             margin: 'md',
             backgroundColor: isConfirmed ? '#ECFDF5' : '#FFFBEB',
+            borderWidth: '1px',
+            borderColor: isConfirmed ? '#A7F3D0' : '#FDE68A',
             cornerRadius: '12px',
-            paddingAll: '12px',
+            paddingAll: '14px',
+            alignItems: 'center',
             contents: [
               {
                 type: 'box',
                 layout: 'vertical',
-                flex: 1,
+                flex: 6,
                 contents: [
                   {
                     type: 'text',
@@ -985,31 +982,34 @@ export const createPurchaseOrderFlexMessage = (data: {
                   },
                   {
                     type: 'text',
-                    text: `${order.qty} ${order.unit}`,
-                    size: 'xl',
+                    text: `${order.qty.toLocaleString()} ${order.unit}`,
+                    size: 'xxl',
                     color: isConfirmed ? '#059669' : '#B45309',
                     weight: 'bold',
+                    wrap: true,
                   },
                 ],
               },
               {
                 type: 'box',
                 layout: 'vertical',
+                flex: 4,
                 contents: [
                   {
                     type: 'text',
                     text: 'สต็อกคงเหลือ:',
-                    size: 'xxs',
+                    size: 'xs',
                     color: '#64748B',
                     align: 'end',
                   },
                   {
                     type: 'text',
                     text: `${order.currentQty ?? '-'} ${order.unit}`,
-                    size: 'sm',
+                    size: 'md',
                     color: '#DC2626',
                     weight: 'bold',
                     align: 'end',
+                    wrap: true,
                   },
                   {
                     type: 'text',
@@ -1285,41 +1285,53 @@ export const createOrderConfirmedFlexMessage = (data: {
             type: 'text',
             text: order.itemName,
             weight: 'bold',
-            size: 'md',
-            color: '#1E293B',
+            size: 'xl',
+            color: '#0F172A',
+            wrap: true,
           },
           {
             type: 'text',
             text: `รหัสอะไหล่: ${order.itemId}`,
             size: 'xs',
-            color: '#64748B',
+            weight: 'bold',
+            color: '#475569',
             margin: 'xs',
           },
           {
             type: 'box',
             layout: 'horizontal',
             margin: 'md',
+            backgroundColor: '#ECFDF5',
+            borderWidth: '1px',
+            borderColor: '#A7F3D0',
+            cornerRadius: '10px',
+            paddingAll: '12px',
+            alignItems: 'center',
             contents: [
               {
                 type: 'text',
-                text: 'จำนวนสั่งซื้อ:',
-                size: 'xs',
-                color: '#64748B',
+                text: 'จำนวนสั่งซื้อ',
+                size: 'sm',
+                weight: 'bold',
+                color: '#065F46',
+                flex: 5,
               },
               {
                 type: 'text',
-                text: `${order.qty} ${order.unit}`,
-                size: 'xs',
+                text: `${order.qty.toLocaleString()} ${order.unit}`,
+                size: 'xl',
                 color: '#059669',
                 weight: 'bold',
                 align: 'end',
+                flex: 7,
+                wrap: true,
               },
             ],
           },
           {
             type: 'box',
             layout: 'horizontal',
-            margin: 'sm',
+            margin: 'md',
             contents: [
               {
                 type: 'text',
@@ -1378,46 +1390,63 @@ export const createOrderConfirmedFlexMessage = (data: {
 
 /**
  * Send reply message using LINE Messaging API replyToken (Instant chat response)
+ * Automatically tries Purchase Order token and primary Channel Access Token
  */
 export const replyLineMessage = async (
   replyToken: string,
   messages: any[],
   customToken?: string
 ): Promise<{ success: boolean; error?: string }> => {
-  const rawToken = (customToken || serverLineConfig.channelAccessToken || process.env.LINE_CHANNEL_ACCESS_TOKEN || '').trim();
-  const token = rawToken.replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '').trim();
-
-  if (!token) {
-    return { success: false, error: 'LINE Channel Access Token ยังไม่ได้กำหนดค่า' };
-  }
   if (!replyToken) {
     return { success: false, error: 'replyToken หายไป' };
   }
 
-  try {
-    const response = await fetch('https://api.line.me/v2/bot/message/reply', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        replyToken,
-        messages,
-      }),
-    });
+  const candidateTokens = Array.from(
+    new Set(
+      [
+        customToken,
+        serverLineConfig.purchaseOrderChannelAccessToken,
+        serverLineConfig.channelAccessToken,
+        process.env.LINE_CHANNEL_ACCESS_TOKEN,
+      ]
+        .map(t => (t || '').trim().replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '').trim())
+        .filter(Boolean)
+    )
+  );
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.warn('LINE reply API error:', response.status, errorBody);
-      return { success: false, error: `LINE reply error ${response.status}: ${errorBody}` };
-    }
-
-    return { success: true };
-  } catch (err: any) {
-    console.warn('Failed to reply to LINE:', err?.message || err);
-    return { success: false, error: err?.message || 'Network error' };
+  if (candidateTokens.length === 0) {
+    return { success: false, error: 'LINE Channel Access Token ยังไม่ได้กำหนดค่า' };
   }
+
+  let lastError = '';
+  for (const token of candidateTokens) {
+    try {
+      const response = await fetch('https://api.line.me/v2/bot/message/reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          replyToken,
+          messages,
+        }),
+      });
+
+      if (response.ok) {
+        return { success: true };
+      }
+
+      const errorBody = await response.text();
+      lastError = `LINE reply error ${response.status}: ${errorBody}`;
+      console.warn('LINE reply API attempt warning:', response.status, errorBody);
+    } catch (err: any) {
+      lastError = err?.message || 'Network error';
+      console.warn('Failed to reply to LINE:', lastError);
+    }
+  }
+
+  return { success: false, error: lastError || 'Failed to reply to LINE' };
 };
 
 /**
@@ -1429,35 +1458,612 @@ export const getLineUserProfile = async (
   customToken?: string
 ): Promise<{ displayName?: string; pictureUrl?: string; userId?: string } | null> => {
   if (!userId) return null;
-  const rawToken = (customToken || serverLineConfig.channelAccessToken || process.env.LINE_CHANNEL_ACCESS_TOKEN || '').trim();
-  const token = rawToken.replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '').trim();
-  if (!token) return null;
+  const candidateTokens = Array.from(
+    new Set(
+      [
+        customToken,
+        serverLineConfig.purchaseOrderChannelAccessToken,
+        serverLineConfig.channelAccessToken,
+        process.env.LINE_CHANNEL_ACCESS_TOKEN,
+      ]
+        .map(t => (t || '').trim().replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '').trim())
+        .filter(Boolean)
+    )
+  );
 
-  try {
-    // If in group chat, query member profile
-    if (groupId) {
-      try {
-        const groupRes = await fetch(`https://api.line.me/v2/bot/group/${groupId}/member/${userId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (groupRes.ok) {
-          const profile = await groupRes.json();
-          return profile;
-        }
-      } catch (_) {}
-    }
+  for (const token of candidateTokens) {
+    try {
+      if (groupId) {
+        try {
+          const groupRes = await fetch(`https://api.line.me/v2/bot/group/${groupId}/member/${userId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (groupRes.ok) {
+            return await groupRes.json();
+          }
+        } catch (_) {}
+      }
 
-    // Direct 1-on-1 user profile
-    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (res.ok) {
-      const profile = await res.json();
-      return profile;
+      const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Could not fetch LINE profile:', err);
     }
-  } catch (err) {
-    console.warn('Could not fetch LINE profile:', err);
   }
   return null;
 };
+
+/**
+ * Create LINE Flex Message for Stock Inquiry Results (ค้นหาสต็อก / ของหมด / ใกล้หมด / หมวดหมู่)
+ */
+export const createStockInquiryFlexMessage = (params: {
+  title: string;
+  subtitle: string;
+  headerColor?: string;
+  queryText: string;
+  totalMatched: number;
+  items: Array<{
+    id: string;
+    name: string;
+    category?: string;
+    qty: number;
+    unit?: string;
+    minStock?: number;
+    location?: string;
+    status?: string;
+    ordered?: string;
+  }>;
+  baseUrl?: string;
+}) => {
+  const {
+    title,
+    subtitle,
+    headerColor = '#0284C7',
+    queryText,
+    totalMatched,
+    items,
+    baseUrl,
+  } = params;
+
+  const displayItems = items.slice(0, 10);
+  const isSingleItem = displayItems.length === 1;
+  const nowStr = new Date().toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    hour: '2-digit',
+    minute: '2-digit',
+    day: 'numeric',
+    month: 'short',
+  });
+
+  const itemRows: any[] = displayItems.map((it, idx) => {
+    const qty = Number(it.qty) || 0;
+    const min = Number(it.minStock) || 1;
+    const unit = it.unit || 'ชิ้น';
+    const isOut = qty <= 0 || it.status === 'out';
+    const isLow = !isOut && (qty <= min || it.status === 'low');
+
+    const statusBadgeText = isOut ? '🔴 หมดสต็อก' : isLow ? '🟡 ใกล้หมด' : '🟢 พร้อมใช้';
+    const statusColor = isOut ? '#DC2626' : isLow ? '#D97706' : '#059669';
+    const statusBg = isOut ? '#FEF2F2' : isLow ? '#FFFBEB' : '#ECFDF5';
+    const statusBorder = isOut ? '#FECACA' : isLow ? '#FDE68A' : '#A7F3D0';
+    const cardBorder = isOut ? '#FCA5A5' : isLow ? '#FCD34D' : '#CBD5E1';
+
+    return {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '14px',
+      backgroundColor: '#FFFFFF',
+      borderWidth: '2px',
+      borderColor: cardBorder,
+      cornerRadius: '14px',
+      margin: idx === 0 ? 'none' : 'md',
+      contents: [
+        // Row 1: Item ID on left + Status badge on right
+        {
+          type: 'box',
+          layout: 'horizontal',
+          alignItems: 'center',
+          contents: [
+            {
+              type: 'box',
+              layout: 'vertical',
+              backgroundColor: '#F1F5F9',
+              cornerRadius: '6px',
+              paddingAll: '4px',
+              paddingStart: '8px',
+              paddingEnd: '8px',
+              flex: 0,
+              contents: [
+                {
+                  type: 'text',
+                  text: `รหัส: ${it.id}`,
+                  size: 'xs',
+                  weight: 'bold',
+                  color: '#334155',
+                },
+              ],
+            },
+            {
+              type: 'box',
+              layout: 'vertical',
+              flex: 1,
+              contents: [],
+            },
+            {
+              type: 'box',
+              layout: 'vertical',
+              backgroundColor: statusBg,
+              borderWidth: '1px',
+              borderColor: statusBorder,
+              cornerRadius: '6px',
+              paddingAll: '4px',
+              paddingStart: '8px',
+              paddingEnd: '8px',
+              flex: 0,
+              contents: [
+                {
+                  type: 'text',
+                  text: statusBadgeText,
+                  size: 'xs',
+                  weight: 'bold',
+                  color: statusColor,
+                  align: 'center',
+                },
+              ],
+            },
+          ],
+        },
+        // Row 2: Part Name (Full width, large & bold, never truncated)
+        {
+          type: 'text',
+          text: isSingleItem ? (it.name || it.id) : `${idx + 1}. ${it.name || it.id}`,
+          weight: 'bold',
+          size: isSingleItem ? 'xl' : 'lg',
+          color: '#0F172A',
+          margin: 'sm',
+          wrap: true,
+        },
+        // Row 3: Category & Location
+        {
+          type: 'text',
+          text: `หมวดหมู่: ${it.category || 'ทั่วไป'}  •  ที่เก็บ: ${it.location || 'Store FL.6'}`,
+          size: 'xs',
+          color: '#475569',
+          margin: 'xs',
+          wrap: true,
+        },
+        // Row 4: Prominent Quantity Box (Dedicated full-width highlight banner)
+        {
+          type: 'box',
+          layout: 'horizontal',
+          margin: 'md',
+          backgroundColor: statusBg,
+          borderWidth: '1px',
+          borderColor: statusBorder,
+          cornerRadius: '10px',
+          paddingAll: '12px',
+          alignItems: 'center',
+          contents: [
+            {
+              type: 'box',
+              layout: 'vertical',
+              flex: 4,
+              contents: [
+                {
+                  type: 'text',
+                  text: 'จำนวนคงเหลือ',
+                  size: 'xs',
+                  weight: 'bold',
+                  color: '#1E293B',
+                },
+                {
+                  type: 'text',
+                  text: `(ขั้นต่ำ ${min} ${unit})`,
+                  size: 'xxs',
+                  color: '#64748B',
+                },
+              ],
+            },
+            {
+              type: 'box',
+              layout: 'vertical',
+              flex: 6,
+              contents: [
+                {
+                  type: 'text',
+                  text: `${qty.toLocaleString()} ${unit}`,
+                  size: isSingleItem ? 'xxl' : 'xl',
+                  weight: 'bold',
+                  color: statusColor,
+                  align: 'end',
+                  wrap: true,
+                },
+              ],
+            },
+          ],
+        },
+        ...(it.ordered
+          ? [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                margin: 'sm',
+                backgroundColor: '#EFF6FF',
+                cornerRadius: '8px',
+                paddingAll: '8px',
+                contents: [
+                  {
+                    type: 'text',
+                    text: `🛒 สถานะสั่งซื้อ: ${it.ordered}`,
+                    size: 'xs',
+                    color: '#1D4ED8',
+                    weight: 'bold',
+                    wrap: true,
+                  },
+                ],
+              },
+            ]
+          : []),
+      ],
+    };
+  });
+
+  const altSummary =
+    displayItems.length > 0
+      ? displayItems
+          .slice(0, 5)
+          .map(i => `• ${i.name} (${i.id}): คงเหลือ ${Number(i.qty) || 0} ${i.unit || 'ชิ้น'}`)
+          .join('\n')
+      : `ไม่พบรายการสำหรับ "${queryText}"`;
+
+  return {
+    type: 'flex',
+    altText: `📦 ${title}: พบ ${totalMatched} รายการ\n${altSummary}`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: headerColor,
+        paddingAll: '16px',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              {
+                type: 'text',
+                text: 'ENG SMART STORE • FL.6',
+                color: '#E0F2FE',
+                size: 'xs',
+                weight: 'bold',
+                flex: 1,
+              },
+              {
+                type: 'text',
+                text: `อัปเดต ${nowStr}`,
+                color: '#E0F2FE',
+                size: 'xs',
+                align: 'end',
+              },
+            ],
+          },
+          {
+            type: 'text',
+            text: title,
+            color: '#FFFFFF',
+            size: 'lg',
+            weight: 'bold',
+            margin: 'xs',
+            wrap: true,
+          },
+          {
+            type: 'text',
+            text: subtitle,
+            color: '#F0F9FF',
+            size: 'xs',
+            margin: 'xs',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '14px',
+        backgroundColor: '#F8FAFC',
+        spacing: 'sm',
+        contents: [
+          ...(itemRows.length > 0
+            ? itemRows
+            : [
+                {
+                  type: 'box',
+                  layout: 'vertical',
+                  paddingAll: '16px',
+                  backgroundColor: '#FFFFFF',
+                  borderWidth: '1px',
+                  borderColor: '#E2E8F0',
+                  cornerRadius: '12px',
+                  contents: [
+                    {
+                      type: 'text',
+                      text: `ไม่พบรายการที่ตรงกับ "${queryText}"`,
+                      size: 'md',
+                      weight: 'bold',
+                      color: '#334155',
+                      align: 'center',
+                      wrap: true,
+                    },
+                    {
+                      type: 'text',
+                      text: 'ลองพิมพ์ชื่ออะไหล่สั้นๆ เช่น "ท่อ PVC", "หลอดไฟ", "แอร์" หรือพิมพ์ "คำสั่ง" เพื่อดูวิธีใช้งาน',
+                      size: 'xs',
+                      color: '#64748B',
+                      align: 'center',
+                      margin: 'sm',
+                      wrap: true,
+                    },
+                  ],
+                },
+              ]),
+          ...(totalMatched > displayItems.length
+            ? [
+                {
+                  type: 'text',
+                  text: `* แสดง ${displayItems.length} รายการแรก จากทั้งหมด ${totalMatched} รายการ`,
+                  size: 'xs',
+                  weight: 'bold',
+                  color: '#475569',
+                  align: 'center',
+                  margin: 'sm',
+                },
+              ]
+            : []),
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '12px',
+        backgroundColor: '#F8FAFC',
+        spacing: 'xs',
+        contents: [
+          {
+            type: 'text',
+            text: '💡 พิมพ์ชื่ออะไหล่, "ของหมด", "ใกล้หมด", "หมวด <ชื่อ>" หรือ "สรุปสต็อก" เพื่อเช็คได้ทันที',
+            size: 'xxs',
+            color: '#64748B',
+            align: 'center',
+            wrap: true,
+          },
+          ...(baseUrl && baseUrl.startsWith('http')
+            ? [
+                {
+                  type: 'button',
+                  style: 'secondary',
+                  height: 'sm',
+                  margin: 'sm',
+                  action: {
+                    type: 'uri',
+                    label: 'เปิดแอปคลังสินค้า Store FL.6',
+                    uri: baseUrl,
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+    },
+  };
+};
+
+/**
+ * Create LINE Flex Message for Warehouse Stock Summary ("สรุปสต็อก" / "ภาพรวม")
+ */
+export const createStockSummaryFlexMessage = (params: {
+  totalItems: number;
+  totalUnits: number;
+  normalCount: number;
+  lowCount: number;
+  outCount: number;
+  categories: Array<{ name: string; count: number }>;
+  baseUrl?: string;
+}) => {
+  const { totalItems, totalUnits, normalCount, lowCount, outCount, categories, baseUrl } = params;
+  const nowStr = new Date().toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    hour: '2-digit',
+    minute: '2-digit',
+    day: 'numeric',
+    month: 'short',
+  });
+
+  const catLines = categories.slice(0, 10).map(c => ({
+    type: 'box',
+    layout: 'horizontal',
+    margin: 'xs',
+    contents: [
+      {
+        type: 'text',
+        text: `• หมวด${c.name}`,
+        size: 'xs',
+        color: '#334155',
+        flex: 7,
+      },
+      {
+        type: 'text',
+        text: `${c.count} รายการ`,
+        size: 'xs',
+        weight: 'bold',
+        color: '#0F172A',
+        align: 'end',
+        flex: 3,
+      },
+    ],
+  }));
+
+  return {
+    type: 'flex',
+    altText: `📊 สรุปสต็อก Store FL.6: ทั้งหมด ${totalItems} รายการ (ปกติ ${normalCount}, ใกล้หมด ${lowCount}, หมด ${outCount})`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#1E293B',
+        paddingAll: '16px',
+        contents: [
+          {
+            type: 'text',
+            text: `ENG SMART STORE • อัปเดต ${nowStr}`,
+            color: '#94A3B8',
+            size: 'xxs',
+            weight: 'bold',
+          },
+          {
+            type: 'text',
+            text: '📊 สรุปภาพรวมสต็อกคลังสินค้า (Store FL.6)',
+            color: '#FFFFFF',
+            size: 'md',
+            weight: 'bold',
+            margin: 'xs',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '16px',
+        spacing: 'md',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'sm',
+            contents: [
+              {
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#F1F5F9',
+                cornerRadius: '10px',
+                paddingAll: '10px',
+                flex: 1,
+                contents: [
+                  { type: 'text', text: 'รายการทั้งหมด', size: 'xxs', color: '#64748B', align: 'center' },
+                  { type: 'text', text: `${totalItems}`, size: 'lg', weight: 'bold', color: '#0F172A', align: 'center' },
+                  { type: 'text', text: `รวม ${totalUnits.toLocaleString()} ชิ้น`, size: 'xxs', color: '#475569', align: 'center' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#ECFDF5',
+                cornerRadius: '10px',
+                paddingAll: '10px',
+                flex: 1,
+                contents: [
+                  { type: 'text', text: 'สถานะปกติ', size: 'xxs', color: '#059669', align: 'center' },
+                  { type: 'text', text: `${normalCount}`, size: 'lg', weight: 'bold', color: '#059669', align: 'center' },
+                  { type: 'text', text: 'รายการ', size: 'xxs', color: '#059669', align: 'center' },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'sm',
+            contents: [
+              {
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#FFFBEB',
+                cornerRadius: '10px',
+                paddingAll: '10px',
+                flex: 1,
+                contents: [
+                  { type: 'text', text: 'ใกล้หมด (Low)', size: 'xxs', color: '#D97706', align: 'center' },
+                  { type: 'text', text: `${lowCount}`, size: 'lg', weight: 'bold', color: '#D97706', align: 'center' },
+                  { type: 'text', text: 'พิมพ์ "ใกล้หมด"', size: 'xxs', color: '#B45309', align: 'center' },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'vertical',
+                backgroundColor: '#FEF2F2',
+                cornerRadius: '10px',
+                paddingAll: '10px',
+                flex: 1,
+                contents: [
+                  { type: 'text', text: 'หมดสต็อก (Out)', size: 'xxs', color: '#DC2626', align: 'center' },
+                  { type: 'text', text: `${outCount}`, size: 'lg', weight: 'bold', color: '#DC2626', align: 'center' },
+                  { type: 'text', text: 'พิมพ์ "ของหมด"', size: 'xxs', color: '#B91C1C', align: 'center' },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'separator',
+            color: '#E2E8F0',
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              {
+                type: 'text',
+                text: 'หมวดหมู่สินค้าในคลัง:',
+                size: 'xs',
+                weight: 'bold',
+                color: '#475569',
+              },
+              ...catLines,
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '12px',
+        backgroundColor: '#F8FAFC',
+        contents: [
+          {
+            type: 'text',
+            text: 'พิมพ์ชื่ออะไหล่ เช่น "สต็อก ท่อ PVC" เพื่อเช็คจำนวนคงเหลือรายชิ้น',
+            size: 'xxs',
+            color: '#64748B',
+            align: 'center',
+            wrap: true,
+          },
+          ...(baseUrl && baseUrl.startsWith('http')
+            ? [
+                {
+                  type: 'button',
+                  style: 'primary',
+                  color: '#2563EB',
+                  height: 'sm',
+                  margin: 'sm',
+                  action: {
+                    type: 'uri',
+                    label: 'เปิดดูแดชบอร์ดในแอป',
+                    uri: baseUrl,
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+    },
+  };
+};
+
 
