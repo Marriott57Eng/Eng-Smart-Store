@@ -181,50 +181,51 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto pb-28 sm:pb-32 transition-colors w-full max-w-full overflow-x-hidden min-w-0">
-      {/* Top Banner / Admin Console Header */}
-      <div className="bg-white/95 dark:bg-slate-900/95 border-b border-slate-200/80 dark:border-slate-800 px-4 sm:px-6 py-3.5 shadow-xs transition-colors">
-        <div className="max-w-7xl mx-auto w-full flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 border border-white/30 shrink-0">
-              <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
+      {/* Vibrant Gradient Admin Header */}
+      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white px-4 sm:px-6 py-5 shadow-lg shadow-blue-600/15 relative overflow-hidden">
+        <div className="absolute -top-16 -right-12 w-48 h-48 bg-white/15 rounded-full blur-2xl pointer-events-none" />
+        <div className="max-w-7xl mx-auto w-full flex flex-col md:flex-row md:items-center justify-between gap-3.5 relative z-10">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-white/15 backdrop-blur-xs text-white flex items-center justify-center shadow-sm border border-white/25 shrink-0">
+              <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  ระบบผู้ดูแลระบบ (Admin Console)
-                </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10.5px] font-extrabold bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-400/30">
-                  Super Admin
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white border border-white/25">
+                  ผู้ดูแลระบบ
+                </span>
+                <span className="text-[11px] font-semibold text-blue-100">
+                  ENG Smart Store · Store FL.6
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                ศูนย์รวมการจัดการผู้ใช้ สินค้า สต็อกคลัง การแจ้งเตือน และรายงานระบบ
-              </p>
+              <h1 className="text-lg sm:text-xl font-black text-white tracking-tight mt-0.5">
+                ศูนย์จัดการสำหรับแอดมิน
+              </h1>
             </div>
           </div>
 
           {/* Quick Stat Pills */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-            <div className="liquid-glass-pill px-3 py-1.5 rounded-xl border border-white/60 dark:border-white/10 flex items-center gap-1.5 shrink-0 text-xs shadow-2xs">
-              <Package className="w-3.5 h-3.5 text-blue-500" />
-              <span className="font-semibold text-slate-600 dark:text-slate-300">สินค้า:</span>
-              <span className="font-black text-slate-900 dark:text-white">{items.length}</span>
+            <div className="px-3.5 py-1.5 rounded-full bg-white/15 backdrop-blur-xs border border-white/25 flex items-center gap-1.5 shrink-0 text-xs">
+              <Package className="w-3.5 h-3.5 text-blue-100" />
+              <span className="font-semibold text-blue-100">สินค้า:</span>
+              <span className="font-black text-white tabular-nums">{items.length}</span>
             </div>
 
             <div 
               onClick={onFilterLowStock}
-              className="liquid-glass-pill px-3 py-1.5 rounded-xl border border-amber-400/30 bg-amber-500/10 dark:bg-amber-400/10 flex items-center gap-1.5 shrink-0 text-xs shadow-2xs cursor-pointer hover:bg-amber-500/20 transition-all"
-              title="คลิกเพื่อดูสินค้าสต็อกต่ำ"
+              className="px-3.5 py-1.5 rounded-full border border-amber-300/50 bg-amber-400/25 hover:bg-amber-400/35 backdrop-blur-xs flex items-center gap-1.5 shrink-0 text-xs cursor-pointer transition-all"
+              title="คลิกเพื่อดูสินค้าใกล้หมด"
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-              <span className="font-semibold text-amber-800 dark:text-amber-200">สต็อกต่ำ/หมด:</span>
-              <span className="font-black text-amber-900 dark:text-amber-100">{lowStockItems.length}</span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-200" />
+              <span className="font-semibold text-amber-100">ใกล้หมด:</span>
+              <span className="font-black text-white tabular-nums">{lowStockItems.length}</span>
             </div>
 
-            <div className="liquid-glass-pill px-3 py-1.5 rounded-xl border border-white/60 dark:border-white/10 flex items-center gap-1.5 shrink-0 text-xs shadow-2xs">
-              <ClipboardList className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="font-semibold text-slate-600 dark:text-slate-300">เบิก/รับ:</span>
-              <span className="font-black text-slate-900 dark:text-white">{requisitions.length}</span>
+            <div className="px-3.5 py-1.5 rounded-full bg-white/15 backdrop-blur-xs border border-white/25 flex items-center gap-1.5 shrink-0 text-xs">
+              <ClipboardList className="w-3.5 h-3.5 text-emerald-200" />
+              <span className="font-semibold text-blue-100">เบิก-รับ:</span>
+              <span className="font-black text-white tabular-nums">{requisitions.length}</span>
             </div>
 
             {/* Geo Location Quick Toggle Pill */}
@@ -232,34 +233,33 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleGeoLocation(!isGeoLocationEnabled)}
-                className={`liquid-glass-pill px-3 py-1.5 rounded-xl border flex items-center gap-2 shrink-0 text-xs shadow-2xs cursor-pointer transition-all hover:scale-[1.02] active:scale-95 ${
+                className={`px-3.5 py-1.5 rounded-full border flex items-center gap-2 shrink-0 text-xs cursor-pointer transition-all active:scale-95 backdrop-blur-xs ${
                   isGeoLocationEnabled
-                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
-                    : 'border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200'
+                    ? 'border-emerald-300/50 bg-emerald-400/25 text-white'
+                    : 'border-amber-300/50 bg-amber-400/25 text-white'
                 }`}
-                title="คลิกเพื่อสลับเปิด-ปิดระบบ Geo Location"
+                title="สลับเปิด-ปิดการตรวจสอบพิกัดคลังสินค้า"
               >
                 <span className="relative flex h-2 w-2">
                   {isGeoLocationEnabled && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
                   )}
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isGeoLocationEnabled ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isGeoLocationEnabled ? 'bg-emerald-300' : 'bg-amber-300'}`}></span>
                 </span>
-                <MapPin className={`w-3.5 h-3.5 ${isGeoLocationEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`} />
-                <span className="font-semibold">Geo Location:</span>
-                <span className="font-black">{isGeoLocationEnabled ? 'เปิดใช้งาน' : 'ปิดระบบ'}</span>
+                <MapPin className="w-3.5 h-3.5" />
+                <span className="font-bold">พิกัด: {isGeoLocationEnabled ? 'เปิด' : 'ปิด'}</span>
               </button>
             )}
 
-            {/* Comprehensive PDF Report Center Button */}
+            {/* PDF Report Center Button */}
             <button
               type="button"
               onClick={() => handleOpenReportModal('individual_requisitions')}
-              className="liquid-glass-pill px-3 py-1.5 rounded-xl border border-indigo-400/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 shrink-0 text-xs shadow-2xs cursor-pointer transition-all hover:scale-[1.02] active:scale-95"
-              title="เปิดศูนย์ออกรายงาน PDF (เลือกช่วงวัน-เวลา และรายบุคคล)"
+              className="px-3.5 py-1.5 rounded-full bg-white text-blue-700 hover:bg-blue-50 flex items-center gap-1.5 shrink-0 text-xs cursor-pointer transition-all active:scale-95 shadow-sm font-bold"
+              title="เปิดหน้าออกรายงาน PDF"
             >
-              <FileDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span className="font-extrabold">ออกรายงาน PDF</span>
+              <FileDown className="w-3.5 h-3.5" />
+              <span>ออกรายงาน PDF</span>
             </button>
           </div>
         </div>
@@ -269,35 +269,34 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
         {/* =========================================================
             ADMIN QUICK ACTIONS BAR (ทุกฟังก์ชันหลักของ Admin)
             ========================================================= */}
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-blue-500" />
-              <span>คำสั่งและเครื่องมือด่วน (Quick Admin Tools)</span>
+            <h2 className="text-xs sm:text-sm font-extrabold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>เมนูลัดสำหรับผู้ดูแลระบบ</span>
             </h2>
             <span className="text-[11px] text-slate-400 dark:text-slate-500">
-              แตะเพื่อทำรายการทันที
+              แตะเพื่อใช้งานทันที
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {/* 1. Add New Item */}
             <button
               type="button"
               onClick={onOpenAddItem}
-              className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-700 text-white shadow-md shadow-blue-500/25 border border-blue-400/40 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer relative overflow-hidden"
+              className="p-4 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-600/20 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
             >
-              <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-              <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center mb-2 border border-white/30">
-                <PackagePlus className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center mb-3 border border-white/20">
+                <PackagePlus className="w-4.5 h-4.5 text-white" />
               </div>
               <div>
-                <div className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1">
+                <div className="font-bold text-xs sm:text-sm text-white flex items-center justify-between gap-1">
                   <span>เพิ่มสินค้าใหม่</span>
-                  <ArrowRight className="w-3.5 h-3.5 opacity-70 group-hover:translate-x-1 transition-transform" />
+                  <ArrowRight className="w-3.5 h-3.5 opacity-80 group-hover:translate-x-0.5 transition-transform" />
                 </div>
                 <p className="text-[11px] text-blue-100 mt-0.5 line-clamp-1">
-                  ลงทะเบียนอะไหล่เข้าคลัง
+                  เพิ่มอะไหล่รายการใหม่เข้าคลัง
                 </p>
               </div>
             </button>
@@ -307,19 +306,18 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenInvoiceScan}
-                className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-teal-600 via-emerald-600 to-green-700 text-white shadow-md shadow-emerald-500/25 border border-emerald-400/40 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer relative overflow-hidden"
+                className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
               >
-                <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-                <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center mb-2 border border-white/30">
-                  <Camera className="w-5 h-5 text-white" />
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center mb-3 border border-white/20">
+                  <Camera className="w-4.5 h-4.5 text-white" />
                 </div>
                 <div>
-                  <div className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1">
+                  <div className="font-bold text-xs sm:text-sm text-white flex items-center justify-between gap-1">
                     <span>สแกนใบส่งของ AI</span>
-                    <ArrowRight className="w-3.5 h-3.5 opacity-70 group-hover:translate-x-1 transition-transform" />
+                    <ArrowRight className="w-3.5 h-3.5 opacity-80 group-hover:translate-x-0.5 transition-transform" />
                   </div>
                   <p className="text-[11px] text-emerald-100 mt-0.5 line-clamp-1">
-                    OCR DO / Invoice รับเข้าคลัง
+                    ถ่ายรูปบิลรับของเข้าคลังอัตโนมัติ
                   </p>
                 </div>
               </button>
@@ -328,25 +326,24 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
             {/* 3. Notification Settings */}
             <button
               type="button"
-              onClick={() => onOpenNotificationSettings('line')}
-              className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-600 to-teal-700 text-white shadow-md shadow-emerald-500/25 border border-emerald-400/40 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer relative overflow-hidden"
+              onClick={() => onOpenNotificationSettings('webpush')}
+              className="p-4 rounded-2xl liquid-glass-card hover:border-blue-400/60 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
             >
-              <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-              <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center mb-2 border border-white/30">
-                <Bell className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3">
+                <Bell className="w-4.5 h-4.5" />
               </div>
               <div>
-                <div className="font-extrabold text-xs sm:text-sm text-white flex items-center gap-1">
-                  <span>ตั้งค่าแจ้งเตือน</span>
-                  <ArrowRight className="w-3.5 h-3.5 opacity-70 group-hover:translate-x-1 transition-transform" />
+                <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center justify-between gap-1">
+                  <span>ตั้งค่าการแจ้งเตือน</span>
+                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform text-slate-500" />
                 </div>
-                <p className="text-[11px] text-emerald-100 mt-0.5 line-clamp-1">
-                  LINE & Web Push
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                  Web Push & LINE สั่งซื้อของ
                 </p>
               </div>
             </button>
 
-            {/* 3. Geo Location Toggle Button */}
+            {/* 4. Geo Location Toggle Button */}
             <button
               type="button"
               onClick={() => {
@@ -355,143 +352,138 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
                 if (onToggleGeoLocation) onToggleGeoLocation(nextVal);
                 saveGeoConfig({ isGeoLocationEnabled: nextVal }, currentUser.name || currentUser.username);
               }}
-              className={`p-3.5 sm:p-4 rounded-2xl border hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer shadow-sm relative overflow-hidden ${
+              className={`p-4 rounded-2xl border active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer ${
                 geoSettings.isGeoLocationEnabled
-                  ? 'bg-gradient-to-br from-teal-700 via-emerald-700 to-emerald-800 text-white border-emerald-400/50 shadow-emerald-500/20'
-                  : 'bg-gradient-to-br from-slate-700 via-slate-800 to-zinc-900 text-white border-amber-400/40 shadow-slate-500/20'
+                  ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300/80 dark:border-emerald-700/60'
+                  : 'liquid-glass-card'
               }`}
             >
-              <div className="flex items-center justify-between w-full mb-2">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+              <div className="flex items-center justify-between w-full mb-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
                   geoSettings.isGeoLocationEnabled
-                    ? 'bg-white/20 text-white border-white/30'
-                    : 'bg-amber-500/20 text-amber-300 border-amber-400/30'
+                    ? 'bg-emerald-500 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                 }`}>
-                  <MapPin className="w-5 h-5" />
+                  <MapPin className="w-4.5 h-4.5" />
                 </div>
-                <div className={`w-10 h-5.5 rounded-full p-0.5 transition-colors duration-300 ease-in-out flex items-center ${
-                  geoSettings.isGeoLocationEnabled ? 'bg-emerald-400 justify-end' : 'bg-slate-600 justify-start'
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                  geoSettings.isGeoLocationEnabled
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}>
-                  <div className="w-4.5 h-4.5 rounded-full bg-white shadow-md transform transition-transform" />
-                </div>
+                  {geoSettings.isGeoLocationEnabled ? 'เปิดใช้งาน' : 'ปิดอยู่'}
+                </span>
               </div>
               <div>
-                <div className="font-extrabold text-xs sm:text-sm text-white flex items-center justify-between gap-1">
-                  <span>Geo Location</span>
-                  <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full ${
-                    geoSettings.isGeoLocationEnabled ? 'bg-emerald-400 text-emerald-950' : 'bg-amber-400 text-amber-950'
-                  }`}>
-                    {geoSettings.isGeoLocationEnabled ? 'ON' : 'OFF'}
-                  </span>
+                <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">
+                  ตรวจสอบพิกัดคลัง (GPS)
                 </div>
-                <p className="text-[11px] opacity-85 mt-0.5 line-clamp-1">
-                  {geoSettings.isGeoLocationEnabled ? `จำกัดพื้นที่ ${geoSettings.maxDistanceMeters} ม.` : 'ปิดระบบ (เบิกได้ทุกที่)'}
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                  {geoSettings.isGeoLocationEnabled ? `รัศมีอนุญาต ${geoSettings.maxDistanceMeters} เมตร` : 'อนุญาตเบิก-รับได้ทุกพื้นที่'}
                 </p>
               </div>
             </button>
 
-            {/* 4. Category & Movement Dashboard */}
+            {/* 5. Category & Movement Dashboard */}
             <button
               type="button"
               onClick={() => onNavigateToTab('dashboard')}
-              className="p-3.5 sm:p-4 rounded-2xl liquid-glass-card border-2 border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-500 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer shadow-sm relative overflow-hidden"
+              className="p-4 rounded-2xl liquid-glass-card hover:border-blue-400/60 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-2 border border-blue-400/30">
-                <BarChart3 className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3">
+                <BarChart3 className="w-4.5 h-4.5" />
               </div>
               <div>
-                <div className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-white flex items-center gap-1">
-                  <span>กราฟการเบิกจ่าย</span>
-                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-1 transition-transform text-slate-500" />
+                <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center justify-between gap-1">
+                  <span>ดูภาพรวมและกราฟ</span>
+                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform text-slate-500" />
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-                  วิเคราะห์แยกตามหมวด
+                  สถิติการเบิก-รับแยกตามหมวดหมู่
                 </p>
               </div>
             </button>
 
-            {/* 5. Export PDF Report */}
+            {/* 6. Export PDF Report */}
             <button
               type="button"
               onClick={() => handleOpenReportModal('individual_requisitions')}
-              className="p-3.5 sm:p-4 rounded-2xl liquid-glass-card border-2 border-slate-200 dark:border-slate-700/80 hover:border-indigo-400 dark:hover:border-indigo-500 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer shadow-sm relative overflow-hidden"
+              className="p-4 rounded-2xl liquid-glass-card hover:border-indigo-400/60 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-2 border border-indigo-400/30">
-                <FileDown className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3">
+                <FileDown className="w-4.5 h-4.5" />
               </div>
               <div>
-                <div className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-white flex items-center gap-1">
+                <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center justify-between gap-1">
                   <span>ออกรายงาน PDF</span>
-                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-1 transition-transform text-slate-500" />
+                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform text-slate-500" />
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-                  เลือกช่วงวัน-เวลา & รายบุคคล
+                  สรุปเบิก-รับ และยอดคงเหลือ
                 </p>
               </div>
             </button>
 
-            {/* 6. Low Stock Audit */}
+            {/* 7. Low Stock Audit */}
             <button
               type="button"
               onClick={onFilterLowStock}
-              className="p-3.5 sm:p-4 rounded-2xl liquid-glass-card border-2 border-slate-200 dark:border-slate-700/80 hover:border-amber-400 dark:hover:border-amber-500 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer shadow-sm relative overflow-hidden"
+              className="p-4 rounded-2xl liquid-glass-card hover:border-amber-400/60 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-2 border border-amber-400/30">
-                <AlertTriangle className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-3">
+                <AlertTriangle className="w-4.5 h-4.5" />
               </div>
               <div>
-                <div className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-white flex items-center gap-1">
-                  <span>ตรวจสต็อกต่ำ ({lowStockItems.length})</span>
-                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-1 transition-transform text-slate-500" />
+                <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center justify-between gap-1">
+                  <span>อะไหล่ใกล้หมด ({lowStockItems.length})</span>
+                  <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform text-slate-500" />
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-                  รายการที่ต้องสั่งซื้อเพิ่ม
-                </p>
-              </div>
-            </button>
-
-            {/* 7. Orders Management Tool */}
-            <button
-              type="button"
-              onClick={() => setAdminSubTab('orders')}
-              className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 text-white shadow-md shadow-amber-500/25 border border-amber-400/40 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-              <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center mb-2 border border-white/30">
-                <ShoppingCart className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <div className="font-extrabold text-xs sm:text-sm text-white flex items-center justify-between gap-1">
-                  <span>รายการสั่งซื้อ</span>
-                  {pendingOrders.length > 0 && (
-                    <span className="bg-white text-amber-700 text-[10px] font-black px-1.5 py-0.2 rounded-full">
-                      {pendingOrders.length}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-amber-100 mt-0.5 line-clamp-1">
-                  {pendingOrders.length > 0 ? `รอยืนยัน ${pendingOrders.length} รายการ` : `${orders.length} รายการทั้งหมด`}
+                  ตรวจสอบรายการที่ถึงเกณฑ์สั่งซื้อ
                 </p>
               </div>
             </button>
 
             {/* 8. Batch Update Tool */}
-            {onOpenBatchUpdate && (
+            {onOpenBatchUpdate ? (
               <button
                 type="button"
                 onClick={onOpenBatchUpdate}
-                className="p-3.5 sm:p-4 rounded-2xl liquid-glass-card border-2 border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 hover:border-purple-400/60 hover:scale-[1.02] active:scale-95 transition-all text-left flex flex-col justify-between group cursor-pointer shadow-sm relative overflow-hidden"
+                className="p-4 rounded-2xl liquid-glass-card hover:border-purple-400/60 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
               >
-                <div className="w-9 h-9 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-2 border border-purple-400/30">
-                  <SlidersHorizontal className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-3">
+                  <SlidersHorizontal className="w-4.5 h-4.5" />
                 </div>
                 <div>
-                  <div className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-white flex items-center gap-1">
-                    <span>แก้ไขสินค้าแบบกลุ่ม</span>
-                    <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-1 transition-transform text-slate-500" />
+                  <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center justify-between gap-1">
+                    <span>แก้ไขข้อมูลแบบกลุ่ม</span>
+                    <ArrowRight className="w-3.5 h-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform text-slate-500" />
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-                    แก้ Min Stock / Location
+                    ปรับเกณฑ์ขั้นต่ำ / จุดจัดเก็บพร้อมกัน
+                  </p>
+                </div>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAdminSubTab('orders')}
+                className="p-4 rounded-2xl liquid-glass-card hover:border-amber-400/60 active:scale-[0.98] transition-all text-left flex flex-col justify-between group cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-3">
+                  <ShoppingCart className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center justify-between gap-1">
+                    <span>รายการสั่งซื้อ</span>
+                    {pendingOrders.length > 0 && (
+                      <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        {pendingOrders.length}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                    {pendingOrders.length > 0 ? `รออนุมัติ ${pendingOrders.length} รายการ` : `ทั้งหมด ${orders.length} รายการ`}
                   </p>
                 </div>
               </button>
@@ -502,34 +494,34 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
         {/* =========================================================
             ADMIN MODULE TABS SWITCHER
             ========================================================= */}
-        <div className="flex border-b border-white/60 dark:border-white/10 gap-2 pb-1 overflow-x-auto">
+        <div className="flex p-1.5 rounded-full liquid-glass-pill gap-1 overflow-x-auto no-scrollbar shadow-2xs">
           <button
             type="button"
             onClick={() => setAdminSubTab('users')}
-            className={`flex items-center gap-2 py-2 px-3.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 py-2 px-4 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer shrink-0 ${
               adminSubTab === 'users'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 border border-blue-500'
-                : 'liquid-glass text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-white/60 dark:border-white/10'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/25'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>จัดการผู้ใช้งาน & สิทธิ์ (Users)</span>
+            <span>จัดการผู้ใช้งาน</span>
           </button>
 
           <button
             type="button"
             onClick={() => setAdminSubTab('orders')}
-            className={`flex items-center gap-2 py-2 px-3.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 py-2 px-4 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer shrink-0 ${
               adminSubTab === 'orders'
-                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 border border-amber-400'
-                : 'liquid-glass text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-white/60 dark:border-white/10'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/25'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <ShoppingCart className="w-4 h-4" />
-            <span>รายการที่ถูกสั่งซื้อ (Orders)</span>
+            <span>รายการสั่งซื้อ</span>
             {pendingOrders.length > 0 && (
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
-                adminSubTab === 'orders' ? 'bg-white text-amber-600' : 'bg-amber-500 text-white'
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                adminSubTab === 'orders' ? 'bg-amber-400 text-slate-950' : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
               }`}>
                 {pendingOrders.length}
               </span>
@@ -539,27 +531,27 @@ export const AdminHubView: React.FC<AdminHubViewProps> = ({
           <button
             type="button"
             onClick={() => setAdminSubTab('inventory')}
-            className={`flex items-center gap-2 py-2 px-3.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 py-2 px-4 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer shrink-0 ${
               adminSubTab === 'inventory'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 border border-blue-500'
-                : 'liquid-glass text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-white/60 dark:border-white/10'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/25'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Package className="w-4 h-4" />
-            <span>ตรวจสอบสต็อก & สินค้า (Inventory Control)</span>
+            <span>ตรวจสอบคลังสินค้า</span>
           </button>
 
           <button
             type="button"
             onClick={() => setAdminSubTab('system')}
-            className={`flex items-center gap-2 py-2 px-3.5 rounded-2xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 py-2 px-4 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer shrink-0 ${
               adminSubTab === 'system'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 border border-blue-500'
-                : 'liquid-glass text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-white/60 dark:border-white/10'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/25'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Sliders className="w-4 h-4" />
-            <span>ตั้งค่าระบบ & สถานะ (System & Alerts)</span>
+            <span>ตั้งค่าระบบและพิกัด</span>
           </button>
         </div>
 

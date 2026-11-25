@@ -3,6 +3,7 @@ import { Download, Smartphone, Share2, PlusSquare, X, CheckCircle2 } from 'lucid
 import { motion, AnimatePresence } from 'motion/react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { useScrollLock } from '../hooks/useScrollLock';
+import { ModalPortal } from './ModalPortal';
 
 interface PWAInstallButtonProps {
   className?: string;
@@ -39,7 +40,38 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
 
   return (
     <>
-      {isInstallable ? (
+      {variant === 'menu' ? (
+        isInstallable ? (
+          <button
+            type="button"
+            onClick={handleInstall}
+            disabled={isInstalling}
+            className={`group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer ${className}`}
+          >
+            <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+              <Download className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="font-bold text-slate-900 dark:text-white leading-tight">ติดตั้งแอปลงเครื่อง</div>
+              <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">เปิดใช้งานเต็มหน้าจอและออฟไลน์</div>
+            </div>
+          </button>
+        ) : isIOS ? (
+          <button
+            type="button"
+            onClick={() => setShowIOSGuide(true)}
+            className={`group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer ${className}`}
+          >
+            <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0">
+              <Smartphone className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="font-bold text-slate-900 dark:text-white leading-tight">ติดตั้งแอปบน iOS</div>
+              <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">วิธีเพิ่มไอคอนลงหน้าจอโฮม</div>
+            </div>
+          </button>
+        ) : null
+      ) : isInstallable ? (
         <button
           type="button"
           onClick={handleInstall}
@@ -63,8 +95,9 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
       ) : null}
 
       {/* iOS Safari Installation Guide Modal */}
-      <AnimatePresence>
-        {showIOSGuide && (
+      <ModalPortal>
+        <AnimatePresence>
+          {showIOSGuide && (
           <div 
             className="fixed inset-0 z-[120] flex items-center justify-center p-4 overscroll-contain"
             onTouchMove={(e) => {
@@ -149,7 +182,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
+        </AnimatePresence>
+      </ModalPortal>
     </>
   );
 };

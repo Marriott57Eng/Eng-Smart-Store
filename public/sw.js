@@ -1,8 +1,8 @@
 // ============================================================================
-// ENG SMART STORE PWA Service Worker (V5 - Clean & Concise Web Push Engine)
+// ENG SMART STORE PWA Service Worker (V6 - Safe Caching & Web Push Engine)
 // ============================================================================
 
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const STATIC_CACHE = `eng-store-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `eng-store-runtime-${CACHE_VERSION}`;
 const API_CACHE = `eng-store-api-${CACHE_VERSION}`;
@@ -74,17 +74,39 @@ self.addEventListener('activate', (event) => {
 // ============================================================================
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isGoogleFont =
+    url.hostname.includes('fonts.googleapis.com') ||
+    url.hostname.includes('fonts.gstatic.com');
 
-  // 3.0 Never cache Service Worker script or Web Push / Order / Auth APIs
+  // 3.0a NEVER intercept cross-origin APIs (Firestore, Firebase Auth, Google APIs, etc.)
+  // Only Google Fonts are eligible for cross-origin caching.
+  if (!isSameOrigin && !isGoogleFont) {
+    return;
+  }
+
+  // 3.0b NEVER intercept Vite dev modules, source files, or versioned dep chunks
+  // Caching these across restarts causes mismatched React chunk versions (Invalid hook call).
   if (
-    url.pathname === '/sw.js' ||
-    url.pathname.startsWith('/api/push') ||
-    url.pathname.startsWith('/api/orders') ||
-    url.pathname.startsWith('/api/auth') ||
-    url.pathname.startsWith('/api/line/webhook') ||
-    url.pathname.startsWith('/api/line/test') ||
-    url.pathname.startsWith('/api/line/notify') ||
-    url.pathname.startsWith('/api/health')
+    isSameOrigin && (
+      url.pathname === '/sw.js' ||
+      url.pathname.startsWith('/node_modules/') ||
+      url.pathname.startsWith('/src/') ||
+      url.pathname.startsWith('/@') ||
+      url.pathname.endsWith('.ts') ||
+      url.pathname.endsWith('.tsx') ||
+      url.pathname.endsWith('.jsx') ||
+      url.searchParams.has('v') ||
+      url.searchParams.has('t') ||
+      url.searchParams.has('import') ||
+      url.pathname.startsWith('/api/push') ||
+      url.pathname.startsWith('/api/orders') ||
+      url.pathname.startsWith('/api/auth') ||
+      url.pathname.startsWith('/api/line/webhook') ||
+      url.pathname.startsWith('/api/line/test') ||
+      url.pathname.startsWith('/api/line/notify') ||
+      url.pathname.startsWith('/api/health')
+    )
   ) {
     return;
   }
@@ -118,7 +140,7 @@ self.addEventListener('fetch', (event) => {
   // 3.2 HTML Navigation requests (Network-First with fast cache fallback)
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetchWithTimeout(event.request, 3500)
+      fetchWithTimeout(event.request, 4500)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             const copy = networkResponse.clone();
@@ -196,8 +218,7 @@ self.addEventListener('fetch', (event) => {
 
   // 3.4 Web Fonts & Google Fonts (Cache-First with cross-origin opaque support)
   if (
-    url.hostname.includes('fonts.googleapis.com') ||
-    url.hostname.includes('fonts.gstatic.com') ||
+    isGoogleFont ||
     url.pathname.match(/\.(woff|woff2|ttf|eot)$/)
   ) {
     event.respondWith(
@@ -239,22 +260,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3.6 Vite Script & Style Bundles (/assets/*, .js, .css, @vite modules)
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const copy = networkResponse.clone();
-            caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
-          }
-          return networkResponse;
-        })
-        .catch(() => cached);
-
-      return cached || fetchPromise;
-    })
-  );
+  // 3.6 Production Hashed Bundles ONLY (/assets/*)
+  if (isSameOrigin && url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        return fetch(event.request)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              const copy = networkResponse.clone();
+              caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, copy));
+            }
+            return networkResponse;
+          })
+          .catch(() => cached || new Response('', { status: 504 }));
+      })
+    );
+  }
 });
 
 // Helper for fetch with timeout

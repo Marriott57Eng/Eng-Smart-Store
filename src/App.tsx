@@ -22,7 +22,6 @@ import { InvoiceScanModal } from './components/InvoiceScanModal';
 import { LoginView } from './components/LoginView';
 import { UserManagementView } from './components/UserManagementView';
 import { AdminHubView } from './components/AdminHubView';
-import { ThemeToggle } from './components/ThemeToggle';
 import { EngLogo } from './components/EngLogo';
 import { TopNavTabs } from './components/TopNavTabs';
 import { ModalPortal } from './components/ModalPortal';
@@ -31,8 +30,10 @@ import { InventorySkeleton } from './components/InventorySkeleton';
 import { 
   Package, Search, RefreshCw, Filter, ClipboardList, Plus,
   AlertTriangle, CheckCircle2, XCircle, Bot, X, FileDown, Loader2, LogOut, User as UserIcon, Bell,
-  BarChart3, Layers, Users, CheckSquare, Zap, Check, ChevronDown, ShoppingCart, Star, SlidersHorizontal
+  BarChart3, Layers, Users, CheckSquare, Zap, Check, ChevronDown, ShoppingCart, Star, SlidersHorizontal, Edit3,
+  MoreVertical, Sun, Moon
 } from 'lucide-react';
+import { useTheme } from './context/ThemeContext';
 import { generateAndDownloadPdf, parseRecordDateTime } from './utils/pdfGenerator';
 import { useGeolocationAuth } from './hooks/useGeolocationAuth';
 import { GeoConfig, getSavedGeoConfig, saveGeoConfig, subscribeGeoConfig, getSavedGeoLocationEnabled, saveGeoLocationSetting, subscribeGeoLocationSetting } from './utils/geo';
@@ -40,9 +41,11 @@ import { GeoRestrictionModal } from './components/GeoRestrictionModal';
 import { TransactionSuccessModal, TransactionSuccessData } from './components/TransactionSuccessModal';
 import { playSuccessSoundAndSpeak } from './utils/audioUtils';
 import { notifyPurchaseOrder } from './utils/lineNotify';
-import { triggerLowStockPush, triggerStockTransactionPush, triggerBulkRequisitionPush, triggerPurchaseOrderPush, syncExistingPushSubscription, triggerLocalPushDisplay, isDeviceWebPushEnabled } from './utils/webPush';
+import { triggerLowStockPush, triggerStockTransactionPush, triggerBulkRequisitionPush, triggerPurchaseOrderPush, syncExistingPushSubscription, triggerLocalPushDisplay, isDeviceWebPushEnabled, wasPushRecentlySentByThisTab } from './utils/webPush';
 import { LineSettingsModal } from './components/LineSettingsModal';
 import { FontSettingsModal } from './components/FontSettingsModal';
+import { EditProfileModal } from './components/EditProfileModal';
+import { LocalUserProfile, getLocalUserProfile, saveLocalUserProfile, getAvatarGradientClass } from './utils/userProfile';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { User } from './types';
@@ -259,17 +262,57 @@ export default function App() {
 
   const [dbErrorAlert, setDbErrorAlert] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const addToast = (toast: Omit<ToastMessage, 'id'>) => {
-    setToasts(prev => [{ ...toast, id: Date.now().toString() + Math.random() }, ...prev]);
-  };
-  const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
+  const addToast = useCallback((toast: Omit<ToastMessage, 'id'>) => {
+    setToasts([{ ...toast, id: Date.now().toString() + Math.random() }]);
+  }, []);
+  const removeToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Local display profile state (nickname & avatar shown in UI only; never alters real name in Firestore)
+  const [localProfile, setLocalProfile] = useState<LocalUserProfile>(() =>
+    getLocalUserProfile(getInitialUser()?.id)
+  );
+  const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
+
+  useEffect(() => {
+    setLocalProfile(getLocalUserProfile(currentUser?.id));
+  }, [currentUser?.id]);
+
+  // Guard admin-only tabs if a non-admin user navigates via URL or loses admin role
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'admin' && (activeTab === 'admin' || activeTab === 'users')) {
+      setActiveTab('inventory');
+    }
+  }, [currentUser?.role, activeTab]);
+
+  const handleSaveLocalProfile = useCallback((nextProfile: LocalUserProfile) => {
+    if (!currentUser?.id) return;
+    const saved = saveLocalUserProfile(currentUser.id, nextProfile);
+    setLocalProfile(saved);
+    addToast({
+      type: 'success',
+      title: 'อัปเดตโปรไฟล์แล้ว',
+      message: saved.displayNickname
+        ? `แสดงชื่อเล่น "${saved.displayNickname}" บนหน้าจอแล้ว (การทำรายการยังคงบันทึกชื่อจริง)`
+        : 'บันทึกการตั้งค่าโปรไฟล์เรียบร้อยแล้ว (การทำรายการยังคงบันทึกชื่อจริง)',
+    });
+  }, [currentUser?.id, addToast]);
+
   // Alert state
   const [showLowStockAlert, setShowLowStockAlert] = useState(false);
   const [hasShownAlert, setHasShownAlert] = useState(false);
   const [isExportingInventoryPdf, setIsExportingInventoryPdf] = useState(false);
 
-  // Search & Filter state
-  const [searchQuery, setSearchQuery] = useState('');
+  // Search & Filter state (supports ?search=... deep links from Low Stock Web Push notifications)
+  const [searchQuery, setSearchQuery] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('search') || '';
+    } catch (_) {
+      return '';
+    }
+  });
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [selectedCategory, setSelectedCategory] = useState<string>('ทั้งหมด');
   const [statusFilter, setStatusFilter] = useState<'all' | 'low' | 'out' | 'low_or_out' | 'favorites'>('all');
@@ -311,6 +354,8 @@ export default function App() {
   const [isLineSettingsModalOpen, setIsLineSettingsModalOpen] = useState(false);
   const [lineSettingsInitialTab, setLineSettingsInitialTab] = useState<'webpush' | 'line'>('webpush');
   const [transactionSuccess, setTransactionSuccess] = useState<TransactionSuccessData | null>(null);
+  const transactionSuccessRef = useRef<boolean>(false);
+  transactionSuccessRef.current = Boolean(transactionSuccess);
 
   // App typography font selection state (IBM Plex Sans Thai / Prompt / Kanit / Chakra Petch / Mitr / Sarabun)
   const [currentFont, setCurrentFont] = useState<string>(() => {
@@ -354,18 +399,36 @@ export default function App() {
     setIsEditItemModalOpen(true);
   };
   
+  const { isDark, toggleTheme } = useTheme();
+
   const [isRequisitionMenuOpen, setIsRequisitionMenuOpen] = useState(false);
   const requisitionMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close requisition menu when clicking outside
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close header dropdown menus when clicking outside or pressing Escape
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (requisitionMenuRef.current && !requisitionMenuRef.current.contains(event.target as Node)) {
         setIsRequisitionMenuOpen(false);
       }
+      if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
+        setIsHeaderMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsRequisitionMenuOpen(false);
+        setIsHeaderMenuOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const handleOpenRequisitionModal = async (item?: InventoryItem | null) => {
@@ -570,13 +633,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Check for saved user session
-    const savedUser = localStorage.getItem('warehouse_user');
-    if (savedUser) {
-      try {
-        setCurrentUser(JSON.parse(savedUser));
-      } catch (e) {}
-    }
     fetchInventory();
 
     // Real-time Firestore Listeners (Defensive guards to guarantee zero crash)
@@ -734,25 +790,45 @@ export default function App() {
       timestamp?: number;
     }, fromRealtimeRelay = false) => {
       if (!payload || !payload.title) return;
-      const dedupeKey = payload.id || payload.tag || `${payload.title}:${payload.body}`;
-      if (seenPushIds.has(dedupeKey)) return;
-      seenPushIds.add(dedupeKey);
-      setTimeout(() => seenPushIds.delete(dedupeKey), 8000);
+      const idKey = payload.id ? `id:${payload.id}` : '';
+      const tagKey = payload.tag ? `tag:${payload.tag}` : '';
+      const contentKey = `content:${payload.title}:${payload.body || ''}`;
 
-      // Show prominent in-app toast notification
-      addToast({
-        type: payload.notificationType === 'low_stock' || payload.type === 'low_stock' ? 'warning' : 'info',
-        title: payload.title,
-        message: payload.body || '',
-      });
+      if (
+        (idKey && seenPushIds.has(idKey)) ||
+        (tagKey && seenPushIds.has(tagKey)) ||
+        seenPushIds.has(contentKey)
+      ) {
+        return;
+      }
+
+      if (idKey) seenPushIds.add(idKey);
+      if (tagKey) seenPushIds.add(tagKey);
+      seenPushIds.add(contentKey);
+
+      setTimeout(() => {
+        if (idKey) seenPushIds.delete(idKey);
+        if (tagKey) seenPushIds.delete(tagKey);
+        seenPushIds.delete(contentKey);
+      }, 10000);
+
+      // Skip in-app toast if this browser tab just triggered this push or if TransactionSuccessModal is open
+      const isSelfOriginated = wasPushRecentlySentByThisTab(payload.tag, payload.title);
+      if (!isSelfOriginated && !transactionSuccessRef.current) {
+        addToast({
+          type: payload.notificationType === 'low_stock' || payload.type === 'low_stock' ? 'warning' : 'info',
+          title: payload.title,
+          message: payload.body || '',
+        });
+      }
 
       // If received via Firestore real-time relay while tab is hidden or if SW push hasn't fired, trigger OS notification
-      if (fromRealtimeRelay && (isDeviceWebPushEnabled() || Notification.permission === 'granted')) {
+      if (fromRealtimeRelay && !isSelfOriginated && (isDeviceWebPushEnabled() || Notification.permission === 'granted')) {
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
           triggerLocalPushDisplay({
             title: payload.title,
             body: payload.body || '',
-            tag: payload.tag || dedupeKey,
+            tag: payload.tag || contentKey,
             showOsNotification: true,
           }).catch(() => {});
         }
@@ -883,20 +959,22 @@ export default function App() {
             : {})
         });
 
-        // Instant UI & state update
-        const updatedList = items.map((i) => (i.id === updatedItem.id ? updatedItem : i));
-        setItems(updatedList);
-        recalculateSummary(updatedList);
-
-        try {
-          localStorage.setItem('warehouse_inventory', JSON.stringify(updatedList));
-        } catch (_) {}
+        // Instant UI & state update via functional updater to prevent stale closure overwrites
+        setItems((prev) => {
+          const updatedList = prev.map((i) => (i.id === updatedItem.id ? updatedItem : i));
+          recalculateSummary(updatedList);
+          try {
+            localStorage.setItem('warehouse_inventory', JSON.stringify(updatedList));
+          } catch (_) {}
+          return updatedList;
+        });
 
         if (selectedItem?.id === updatedItem.id) {
           setSelectedItem(updatedItem);
         }
 
-        // Show Transaction Success Pop Up Modal
+        // Show Transaction Success Pop Up Modal (Clear any floating toasts so popups never stack)
+        setToasts([]);
         setTransactionSuccess({
           type: recordData.type,
           itemId: updatedItem.id,
@@ -911,19 +989,13 @@ export default function App() {
           newQty: newQty,
         });
 
-        addToast({
-          type: 'success',
-          title: isStockIn ? 'รับเข้าสินค้าสำเร็จ' : 'เบิกสินค้าสำเร็จ',
-          message: `${isStockIn ? 'รับเข้า' : 'เบิก'} ${updatedItem.name} จำนวน ${recordData.qty} ${updatedItem.unit} (คงเหลือ: ${newQty} ${updatedItem.unit})`,
-        });
-
         // 3. Persist to Firestore asynchronously in background (Non-blocking)
         Promise.all([
           setDoc(doc(db, 'requisitions', newRecord.id), newRecord),
           setDoc(doc(db, 'inventory', updatedItem.id), updatedItem)
         ]).catch(err => console.error("Background Firestore sync error:", err));
 
-        // 4. Send Real-time Web Push Notifications (Primary Notification System)
+        // 4. Send Real-time Web Push Notification (Single consolidated push including low-stock status)
         triggerStockTransactionPush({
           type: recordData.type,
           itemId: updatedItem.id,
@@ -933,11 +1005,8 @@ export default function App() {
           requestedBy: recordData.requestedBy,
           purpose: recordData.purpose,
           newQty,
+          minStock: updatedItem.minStock,
         }).catch(err => console.warn("Web Push transaction warning:", err));
-
-        if (newQty <= (updatedItem.minStock || 5) || newStatus === 'low' || newStatus === 'out') {
-          triggerLowStockPush(updatedItem, newQty).catch(err => console.warn("Web Push low stock warning:", err));
-        }
       } else {
         setDoc(doc(db, 'requisitions', newRecord.id), newRecord).catch(console.error);
       }
@@ -1096,9 +1165,9 @@ export default function App() {
   // ==========================================
   // Purchase Order Handlers (ฟังก์ชันสั่งซื้อสินค้า)
   // ==========================================
-  const handleOpenOrderModal = (item: InventoryItem) => {
+  const handleOpenOrderModal = useCallback((item: InventoryItem) => {
     setOrderModalItem(item);
-  };
+  }, []);
 
   const handleSubmitOrder = async (orderData: Partial<PurchaseOrder>) => {
     try {
@@ -1654,7 +1723,8 @@ export default function App() {
         }).catch(err => console.warn('Server order receive sync warning:', err));
       }
 
-      // 3. Show Transaction Success Modal & Audio/Toast Feedback
+      // 3. Show Transaction Success Modal & Audio Feedback (Clear any floating toasts so popups never stack)
+      setToasts([]);
       setTransactionSuccess({
         type: 'in',
         itemId: committedItem.id,
@@ -1670,11 +1740,6 @@ export default function App() {
       });
 
       playSuccessSoundAndSpeak(`รับสินค้า ${committedItem.name} จำนวน ${qtyToAdd} ${committedItem.unit} เข้าคลังเรียบร้อยแล้วค่ะ`);
-      addToast({
-        type: 'success',
-        title: 'รับสินค้าเข้าคลังเรียบร้อย',
-        message: `เพิ่มสต็อก ${committedItem.name} +${qtyToAdd} ${committedItem.unit} (คงเหลือ: ${newQty} ${committedItem.unit})`,
-      });
     } catch (err: any) {
       if (err?.alreadyReceived) {
         if (err.order) {
@@ -1853,12 +1918,8 @@ export default function App() {
       return;
     }
     
-    // Popup Success
-    if (action.action === 'requisition') {
-      addToast({ type: 'success', title: 'เบิกสินค้าสำเร็จ', message: `เบิก ${action.item?.name || 'สินค้า'} จำนวน ${action.record?.qty || 0}` });
-    } else if (action.action === 'stock_in') {
-      addToast({ type: 'success', title: 'รับเข้าสินค้าสำเร็จ', message: `รับเข้า ${action.item?.name || 'สินค้า'} จำนวน ${action.record?.qty || 0}` });
-    } else if (action.action === 'update_stock') {
+    // Popup Success (Only show toast for update_stock; requisition/stock_in use TransactionSuccessModal)
+    if (action.action === 'update_stock') {
       addToast({ type: 'success', title: 'อัปเดตสต็อกสำเร็จ', message: `อัปเดต ${action.item?.name || 'สินค้า'} เรียบร้อย` });
     }
 
@@ -1878,6 +1939,7 @@ export default function App() {
       }
 
       if (action.item && action.record) {
+        setToasts([]);
         setTransactionSuccess({
           type: isStockIn ? 'in' : 'out',
           itemId: action.item.id,
@@ -1928,7 +1990,7 @@ export default function App() {
 
         setDoc(doc(db, 'inventory', cleanItem.id), cleanItem).catch(err => console.error("Failed to update inventory", err));
 
-        // Send Web Push notification for AI-assisted stock actions (Primary Notification System)
+        // Send Web Push notification for AI-assisted stock actions (Single consolidated push)
         if (action.record) {
           triggerStockTransactionPush({
             type: isStockIn ? 'in' : 'out',
@@ -1939,11 +2001,8 @@ export default function App() {
             requestedBy: action.record.requestedBy,
             purpose: action.record.purpose,
             newQty: cleanItem.qty,
+            minStock: cleanItem.minStock,
           }).catch(err => console.warn("Web Push AI transaction notice:", err));
-
-          if (cleanItem.qty <= (cleanItem.minStock || 5) || cleanItem.status === 'low' || cleanItem.status === 'out') {
-            triggerLowStockPush(cleanItem, cleanItem.qty).catch(err => console.warn("Web Push AI low stock notice:", err));
-          }
         }
       }
     } else if (action.action === 'update_stock') {
@@ -1986,34 +2045,6 @@ export default function App() {
         return updated;
       });
       deleteDoc(doc(db, 'requisitions', action.recordId)).catch(err => console.error("Failed to delete requisition", err));
-    }
-
-    // Popup Warning for low stock after requisition
-    if (action.action === 'requisition' && action.item) {
-      const it = action.item;
-      if (it.qty <= 0) {
-        addToast({ 
-          type: 'error', 
-          title: '⚠️ สินค้าหมดสต็อก!', 
-          message: `${it.name} หมดสต็อกแล้ว (คงเหลือ 0 ${it.unit})`,
-          actionText: 'ดูสินค้า',
-          onClick: () => {
-            setSelectedItem(it);
-            setActiveTab('inventory');
-          }
-        });
-      } else if (it.qty <= it.minStock) {
-        addToast({ 
-          type: 'warning', 
-          title: '⚠️ สินค้าใกล้หมด', 
-          message: `${it.name} เหลือเพียง ${it.qty} ${it.unit}`,
-          actionText: 'ดูสินค้า',
-          onClick: () => {
-            setSelectedItem(it);
-            setActiveTab('inventory');
-          }
-        });
-      }
     }
   };
 
@@ -2319,7 +2350,8 @@ export default function App() {
     setIsMultiSelectMode(false);
     setIsBulkRequisitionModalOpen(false);
 
-    // Show success modal with audio/voice
+    // Show success modal with audio/voice (Clear any floating toasts so popups never stack)
+    setToasts([]);
     setTransactionSuccess({
       type: 'out',
       requestedBy: data.requestedBy,
@@ -2329,11 +2361,10 @@ export default function App() {
       bulkItems: bulkItemsForSuccess,
     });
 
-    addToast({
-      type: 'success',
-      title: 'เบิกสินค้าพร้อมกันสำเร็จ',
-      message: `เบิกสำเร็จ ${bulkItemsForSuccess.length} รายการ (${bulkItemsForSuccess.reduce((sum, i) => sum + i.qty, 0)} ชิ้น)`,
-    });
+    const totalBulkUnits = bulkItemsForSuccess.reduce((sum, i) => sum + i.qty, 0);
+    playSuccessSoundAndSpeak(
+      `บันทึกการเบิกพร้อมกัน ${bulkItemsForSuccess.length} รายการ รวม ${totalBulkUnits} ชิ้น เรียบร้อยแล้วค่ะ`
+    );
 
     // Persist to Firestore asynchronously
     const firestorePromises: Promise<any>[] = [];
@@ -2353,7 +2384,7 @@ export default function App() {
     }
     Promise.all(firestorePromises).catch((err) => console.error("Firestore sync error:", err));
 
-    // Send Web Push Notification asynchronously (Primary Notification System)
+    // Send single consolidated Web Push Notification asynchronously
     triggerBulkRequisitionPush({
       type: 'out',
       items: bulkItemsForSuccess.map(i => ({
@@ -2366,13 +2397,6 @@ export default function App() {
       requestedBy: data.requestedBy,
       purpose: data.purpose,
     }).catch((err) => console.warn("Web push bulk notification notice:", err));
-
-    // Web Push alerts for low stock items
-    updatedItemsMap.forEach((uItem) => {
-      if (uItem.status === 'low' || uItem.status === 'out') {
-        triggerLowStockPush(uItem, uItem.qty).catch((err) => console.warn("Web push alert:", err));
-      }
-    });
   };
 
   // Handle Admin Batch Update (Update Location and/or MinStock for multiple items simultaneously)
@@ -2585,19 +2609,47 @@ export default function App() {
         {/* Universal Sticky Top Header: Solid opaque background to prevent any blurry bleed-through on mobile/iOS */}
         <header className="bg-white dark:bg-slate-900 sticky top-0 z-30 px-3 sm:px-5 md:px-6 pt-safe-header pb-2.5 shadow-xs border-b border-slate-200/90 dark:border-slate-800 transition-colors duration-200">
           <div className="max-w-7xl mx-auto w-full">
-            <div className="flex items-center justify-between gap-2 sm:gap-3">
-              {/* User Info Badge (Left) */}
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="flex items-center gap-1.5 liquid-glass-pill px-2.5 sm:px-3 py-1 rounded-2xl shadow-2xs min-w-0 border border-white/70 dark:border-white/10" title={currentUser.name}>
-                  <div className="w-5 h-5 rounded-full bg-blue-500/20 dark:bg-blue-400/20 border border-blue-400/30 flex items-center justify-center shrink-0 shadow-xs">
-                    <UserIcon className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate leading-tight max-w-[130px] sm:max-w-[180px]">
-                      {currentUser.name || currentUser.username}
-                    </span>
-                  </div>
-                </div>
+            <div className="flex items-center justify-between gap-2.5 sm:gap-3">
+              {/* User Info Badge & Quick Edit Profile Button (Left) - Generous width so name & avatar are never crowded */}
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 xl:flex-initial">
+                <button
+                  type="button"
+                  onClick={() => setIsEditProfileModalOpen(true)}
+                  className="flex items-center gap-2 liquid-glass-pill pl-1.5 pr-3 py-1 rounded-2xl shadow-2xs min-w-0 max-w-full border border-white/70 dark:border-white/10 hover:border-blue-400/50 dark:hover:border-blue-500/40 transition-all active:scale-95 cursor-pointer"
+                  title={`ชื่อจริงในระบบ: ${currentUser.name || currentUser.username} (แตะเพื่อแก้ไขชื่อเล่น/รูปโปรไฟล์)`}
+                >
+                  {localProfile.avatarDataUrl ? (
+                    <img
+                      src={localProfile.avatarDataUrl}
+                      alt={localProfile.displayNickname || currentUser.name || currentUser.username}
+                      className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-full object-cover shrink-0 ring-1 ring-blue-400/40 shadow-xs"
+                    />
+                  ) : (
+                    <div
+                      className={`w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-full bg-gradient-to-br ${getAvatarGradientClass(
+                        localProfile.avatarColor
+                      )} flex items-center justify-center shrink-0 shadow-xs text-white text-xs font-black`}
+                    >
+                      {localProfile.displayNickname
+                        ? localProfile.displayNickname.charAt(0).toUpperCase()
+                        : <UserIcon className="w-3.5 h-3.5 text-white" />}
+                    </div>
+                  )}
+                  <span className="text-[13px] sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate leading-tight">
+                    {localProfile.displayNickname || currentUser.name || currentUser.username}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsEditProfileModalOpen(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 dark:bg-blue-500/15 dark:hover:bg-blue-500/25 border border-blue-400/30 transition-all active:scale-95 cursor-pointer shrink-0 shadow-2xs"
+                  title="แก้ไขโปรไฟล์ (เปลี่ยนชื่อเล่นหรือรูปภาพโปรไฟล์)"
+                >
+                  <Edit3 className="w-3 h-3 shrink-0" />
+                  <span className="hidden sm:inline">แก้ไขโปรไฟล์</span>
+                  <span className="sm:hidden">แก้ไข</span>
+                </button>
               </div>
 
               {/* Automatic Mode Tabs: Shown at top on large screens (xl), hidden on mobile/tablet/preview */}
@@ -2612,83 +2664,38 @@ export default function App() {
                 className="hidden xl:flex"
               />
 
-              {/* Header Action Buttons (Right) */}
-              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                {/* Dark Mode Toggle */}
-                <ThemeToggle />
-
-                {/* PWA In-App Install Prompt */}
-                <PWAInstallButton />
-
-                {/* Logout Button */}
-                <button
-                  onClick={() => setShowLogoutConfirm(true)}
-                  className="p-2 sm:p-2.5 rounded-2xl text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 active:scale-95 transition-all flex items-center liquid-glass-pill cursor-pointer shadow-2xs border border-white/60 dark:border-white/10"
-                  title="ออกจากระบบ"
-                >
-                  <LogOut className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                </button>
-
-                {/* Refresh / Sync Button */}
-                <button
-                  onClick={() => fetchInventory(true)}
-                  disabled={refreshing}
-                  className="p-2 sm:p-2.5 rounded-2xl text-slate-700 dark:text-slate-200 hover:bg-white/80 dark:hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-1 liquid-glass-pill cursor-pointer shadow-2xs border border-white/60 dark:border-white/10"
-                  title="ซิงค์ข้อมูลล่าสุด"
-                >
-                  <RefreshCw className={`w-4 h-4 sm:w-4.5 sm:h-4.5 ${refreshing ? 'animate-spin text-blue-600 dark:text-blue-400' : ''}`} />
-                </button>
-
-                {/* Notification Settings (Web Push Primary for all users & LINE PO Bot) */}
-                <button
-                  onClick={() => {
-                    setLineSettingsInitialTab('webpush');
-                    setIsLineSettingsModalOpen(true);
-                  }}
-                  className="p-2 sm:p-2.5 rounded-2xl text-blue-700 dark:text-blue-300 hover:bg-blue-500/15 active:scale-95 transition-all flex items-center border border-blue-400/30 bg-blue-500/10 dark:bg-blue-400/10 cursor-pointer shadow-2xs backdrop-blur-md"
-                  title="การแจ้งเตือน (Web Push Notification & LINE สั่งของ)"
-                >
-                  <Bell className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-blue-600 dark:text-blue-400" />
-                </button>
-
-                {/* Add Item (Admin) */}
-                {currentUser.role === 'admin' && (
-                  <button
-                    onClick={handleOpenAddItemModal}
-                    className="p-2 sm:p-2.5 px-2.5 sm:px-3 rounded-2xl bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 dark:from-slate-700 dark:to-slate-850 text-white active:scale-95 transition-all text-xs sm:text-sm font-bold flex items-center gap-1 border border-white/15 shadow-sm cursor-pointer relative overflow-hidden"
-                    title="เพิ่มสินค้าใหม่ (Admin)"
-                  >
-                    <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-                    <Plus className="w-4 h-4" />
-                    <span className="hidden sm:inline">เพิ่มสินค้า</span>
-                  </button>
-                )}
-
+              {/* Streamlined Header Actions (Right): Only Primary Requisition CTA + Compact More Menu */}
+              <div className="flex items-center gap-1.5 shrink-0">
                 {/* Requisition Button with Dropdown (โหมดเบิกของ) */}
                 <div className="relative flex items-center shadow-md shadow-blue-500/25 rounded-2xl" ref={requisitionMenuRef}>
                   <button
                     onClick={() => {
                       setIsRequisitionMenuOpen(false);
+                      setIsHeaderMenuOpen(false);
                       handleOpenRequisitionModal();
                     }}
-                    className="p-2 sm:p-2.5 px-3 sm:px-3.5 rounded-l-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white active:scale-95 transition-all text-xs sm:text-sm font-bold flex items-center gap-1.5 border-t border-b border-l border-blue-400/40 cursor-pointer relative overflow-hidden"
+                    className="h-9 px-3 sm:px-3.5 rounded-l-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white active:scale-95 transition-all text-xs sm:text-sm font-bold flex items-center gap-1.5 border-t border-b border-l border-blue-400/40 cursor-pointer relative overflow-hidden"
                     title="บันทึกการเบิกของ"
                   >
                     <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent pointer-events-none" />
-                    <ClipboardList className="w-4 h-4 relative z-10" />
+                    <ClipboardList className="w-4 h-4 relative z-10 shrink-0" />
                     <span className="relative z-10">เบิกของ</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setIsRequisitionMenuOpen((prev) => !prev)}
-                    className="p-2 sm:p-2.5 px-2 rounded-r-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white active:scale-95 transition-all border-t border-b border-r border-blue-400/40 border-l border-l-blue-400/30 cursor-pointer relative"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      setIsRequisitionMenuOpen((prev) => !prev);
+                    }}
+                    className="h-9 px-2 rounded-r-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white active:scale-95 transition-all border-t border-b border-r border-blue-400/40 border-l border-l-blue-400/30 cursor-pointer relative flex items-center justify-center"
                     title="ตัวเลือกโหมดเบิกของ (เบิก 1 ชิ้น หรือ เลือกหลายชิ้น)"
+                    aria-label="ตัวเลือกโหมดเบิกของ"
                   >
                     <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isRequisitionMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
 
-                  {/* Dropdown Options for Requisition Mode with Smooth Spring & Liquid Glass Animation */}
+                  {/* Dropdown Options for Requisition Mode */}
                   <AnimatePresence>
                     {isRequisitionMenuOpen && (
                       <motion.div
@@ -2697,7 +2704,7 @@ export default function App() {
                         exit={{ opacity: 0, scale: 0.92, y: -4 }}
                         transition={{ type: 'spring', damping: 25, stiffness: 380, mass: 0.8 }}
                         style={{ transformOrigin: 'top right' }}
-                        className="absolute right-0 top-full mt-2 w-60 rounded-2xl backdrop-blur-2xl bg-white/95 dark:bg-slate-900/90 shadow-2xl shadow-indigo-500/10 dark:shadow-black/60 border border-slate-200/80 dark:border-white/10 p-1.5 z-50 overflow-hidden"
+                        className="absolute right-0 top-full mt-2 w-60 rounded-2xl backdrop-blur-2xl bg-white/95 dark:bg-slate-900/95 shadow-2xl shadow-indigo-500/10 dark:shadow-black/60 border border-slate-200/80 dark:border-white/10 p-1.5 z-50 overflow-hidden"
                       >
                         <button
                           type="button"
@@ -2732,6 +2739,158 @@ export default function App() {
                           <div>
                             <div className="font-bold text-blue-600 dark:text-blue-400">เลือกหลายชิ้น (เบิกเป็นชุด)</div>
                             <div className="text-[11px] text-slate-400 dark:text-slate-500">ติ๊กเลือกหลายรายการเพื่อตัดยอดพร้อมกัน</div>
+                          </div>
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Unified Compact More Menu (Consolidates Add Item, Notifications, Sync, Theme, PWA Install, Logout) */}
+                <div className="relative" ref={headerMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRequisitionMenuOpen(false);
+                      setIsHeaderMenuOpen((prev) => !prev);
+                    }}
+                    className={`relative h-9 w-9 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer border shadow-2xs ${
+                      isHeaderMenuOpen
+                        ? 'bg-slate-900 text-white border-slate-800 dark:bg-white dark:text-slate-900 dark:border-white'
+                        : 'liquid-glass-pill text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200/80 dark:border-white/10'
+                    }`}
+                    title="เมนูเพิ่มเติม (แจ้งเตือน, ซิงค์, ธีม, ออกจากระบบ)"
+                    aria-label="เมนูเพิ่มเติม"
+                    aria-expanded={isHeaderMenuOpen}
+                  >
+                    {refreshing ? (
+                      <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
+                    ) : (
+                      <MoreVertical className="w-4.5 h-4.5" />
+                    )}
+                  </button>
+
+                  <AnimatePresence>
+                    {isHeaderMenuOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.92, y: -6 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.94, y: -4 }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 380, mass: 0.8 }}
+                        style={{ transformOrigin: 'top right' }}
+                        className="absolute right-0 top-full mt-2 w-64 rounded-2xl backdrop-blur-2xl bg-white/95 dark:bg-slate-900/95 shadow-2xl shadow-slate-900/15 dark:shadow-black/60 border border-slate-200/80 dark:border-white/10 p-1.5 z-50 overflow-hidden"
+                      >
+                        {/* Admin: Add Item */}
+                        {currentUser.role === 'admin' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsHeaderMenuOpen(false);
+                                handleOpenAddItemModal();
+                              }}
+                              className="group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer"
+                            >
+                              <div className="w-8 h-8 rounded-xl bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center shrink-0">
+                                <Plus className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-900 dark:text-white leading-tight">เพิ่มสินค้าใหม่</div>
+                                <div className="text-[11px] text-slate-400 dark:text-slate-500">เพิ่มรายการอะไหล่เข้าคลัง (Admin)</div>
+                              </div>
+                            </button>
+                            <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                          </>
+                        )}
+
+                        {/* Notification Settings */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsHeaderMenuOpen(false);
+                            setLineSettingsInitialTab('webpush');
+                            setIsLineSettingsModalOpen(true);
+                          }}
+                          className="group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer"
+                        >
+                          <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                            <Bell className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 dark:text-white leading-tight">การแจ้งเตือน</div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">Web Push & LINE สั่งของ</div>
+                          </div>
+                        </button>
+
+                        {/* Sync / Refresh Data */}
+                        <button
+                          type="button"
+                          disabled={refreshing}
+                          onClick={() => {
+                            setIsHeaderMenuOpen(false);
+                            fetchInventory(true);
+                          }}
+                          className="group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-900/35 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 dark:text-white leading-tight">ซิงค์ข้อมูลล่าสุด</div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">อัปเดตสต็อกจากฐานข้อมูล</div>
+                          </div>
+                        </button>
+
+                        {/* Theme Switch */}
+                        <button
+                          type="button"
+                          onClick={() => toggleTheme()}
+                          className="group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 active:scale-[0.98] rounded-xl flex items-center justify-between gap-2 transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                              isDark
+                                ? 'bg-amber-500/15 text-amber-400'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 dark:text-white leading-tight">
+                                {isDark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
+                              </div>
+                              <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                                {isDark ? 'กำลังใช้โหมดมืด' : 'กำลังใช้โหมดสว่าง'}
+                              </div>
+                            </div>
+                          </div>
+                          <span className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${
+                            isDark ? 'bg-blue-600 justify-end' : 'bg-slate-300 justify-start'
+                          }`}>
+                            <span className="w-4 h-4 rounded-full bg-white shadow-xs" />
+                          </span>
+                        </button>
+
+                        {/* PWA Install (only renders if installable or iOS and not yet installed) */}
+                        <PWAInstallButton variant="menu" />
+
+                        <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                        {/* Logout */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsHeaderMenuOpen(false);
+                            setShowLogoutConfirm(true);
+                          }}
+                          className="group w-full px-3 py-2 text-left text-xs sm:text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 active:scale-[0.98] rounded-xl flex items-center gap-3 transition-all cursor-pointer"
+                        >
+                          <div className="w-8 h-8 rounded-xl bg-rose-100 dark:bg-rose-900/35 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                            <LogOut className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold leading-tight">ออกจากระบบ</div>
+                            <div className="text-[11px] text-rose-400/90 dark:text-rose-400/70">สลับบัญชีหรือเลิกใช้งาน</div>
                           </div>
                         </button>
                       </motion.div>
@@ -3612,6 +3771,20 @@ export default function App() {
           currentFont={currentFont}
           onSelectFont={handleSelectFont}
         />
+
+        {/* Quick Edit Display Profile Modal (Local nickname & avatar only; DB real name stays intact) */}
+        <AnimatePresence>
+          {isEditProfileModalOpen && (
+            <EditProfileModal
+              key="edit-profile-modal"
+              isOpen={isEditProfileModalOpen}
+              currentUser={currentUser}
+              profile={localProfile}
+              onClose={() => setIsEditProfileModalOpen(false)}
+              onSave={handleSaveLocalProfile}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

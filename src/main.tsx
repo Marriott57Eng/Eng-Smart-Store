@@ -15,11 +15,12 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Register service worker with proactive caching and update detection
+// Register service worker with proactive update detection
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
+      const registration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      registration.update().catch(() => {});
       
       // Proactively check for service worker updates
       registration.addEventListener('updatefound', () => {

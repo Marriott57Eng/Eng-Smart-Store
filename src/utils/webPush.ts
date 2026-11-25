@@ -496,11 +496,39 @@ export async function unsubscribeFromWebPush(): Promise<{ success: boolean; erro
   }
 }
 
+const recentlySentPushMap = new Map<string, number>();
+
+function markPushSentByThisTab(tag?: string, title?: string) {
+  const now = Date.now();
+  if (tag) recentlySentPushMap.set(`tag:${tag}`, now);
+  if (title) recentlySentPushMap.set(`title:${title}`, now);
+  // Cleanup entries older than 12s
+  for (const [k, ts] of recentlySentPushMap.entries()) {
+    if (now - ts > 12000) {
+      recentlySentPushMap.delete(k);
+    }
+  }
+}
+
+export function wasPushRecentlySentByThisTab(tag?: string, title?: string): boolean {
+  const now = Date.now();
+  if (tag) {
+    const t = recentlySentPushMap.get(`tag:${tag}`);
+    if (t && now - t < 10000) return true;
+  }
+  if (title) {
+    const t = recentlySentPushMap.get(`title:${title}`);
+    if (t && now - t < 10000) return true;
+  }
+  return false;
+}
+
 /**
  * Send Web Push notification (Broadcasts to all subscribed devices even if app is closed)
  */
 export async function sendWebPushNotification(payload: WebPushPayload): Promise<{ success: boolean; error?: string }> {
   try {
+    markPushSentByThisTab(payload.tag, payload.title);
     const res = await fetch('/api/push/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -564,6 +592,7 @@ export async function triggerStockTransactionPush(data: {
   requestedBy: string;
   purpose: string;
   newQty?: number;
+  minStock?: number;
 }) {
   const cfg = await fetchWebPushConfigFromFirestore();
   if (!cfg.enabled || cfg.notifyImportantRequisition === false) {
@@ -590,7 +619,14 @@ export async function triggerStockTransactionPush(data: {
     rawPurpose === 'รับสินค้าเข้าคลัง';
   const purposeSuffix = isDefaultPurpose ? '' : ` • ${rawPurpose}`;
 
-  const body = `${data.itemName}\nโดย ${data.requestedBy}${purposeSuffix}`;
+  const lowStockSuffix =
+    !isStockIn && data.newQty !== undefined && data.newQty <= (data.minStock ?? 5)
+      ? data.newQty <= 0
+        ? ' • 🚨 ของหมด!'
+        : ' • ⚠️ ใกล้หมด'
+      : '';
+
+  const body = `${data.itemName}\nโดย ${data.requestedBy}${purposeSuffix}${lowStockSuffix}`;
 
   return await sendWebPushNotification({
     title,

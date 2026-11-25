@@ -62,8 +62,9 @@ export const OrdersManagementView: React.FC<OrdersManagementViewProps> = ({
   const [activeTab, setActiveTab] = useState<'all_sections' | 'pending' | 'confirmed' | 'received' | 'cancelled'>('all_sections');
   const [showHistory, setShowHistory] = useState(false);
   
-  // State for Receive Goods Modal
+  // State for Receive Goods Modal & Cancel Confirmation Modal
   const [receivingOrder, setReceivingOrder] = useState<PurchaseOrder | null>(null);
+  const [cancellingOrder, setCancellingOrder] = useState<PurchaseOrder | null>(null);
   const [receivedQty, setReceivedQty] = useState<number | string>(1);
   const [receiveNote, setReceiveNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -132,12 +133,18 @@ export const OrdersManagementView: React.FC<OrdersManagementViewProps> = ({
     }
   };
 
-  const handleQuickCancel = async (order: PurchaseOrder) => {
-    if (!window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการยกเลิกคำสั่งซื้อ "${order.id}" (${order.itemName})?`)) return;
+  const handleQuickCancel = (order: PurchaseOrder) => {
+    setCancellingOrder(order);
+  };
+
+  const handleConfirmCancelOrder = async () => {
+    if (!cancellingOrder) return;
+    const targetOrder = cancellingOrder;
     try {
       setIsProcessing(true);
-      await onCancelOrder(order.id, 'ผู้ดูแลระบบยกเลิกผ่านหน้าเว็บ');
-      setActionSuccessMsg(`ยกเลิกคำสั่งซื้อ ${order.id} แล้ว`);
+      await onCancelOrder(targetOrder.id, 'ผู้ดูแลระบบยกเลิกผ่านหน้าเว็บ');
+      setCancellingOrder(null);
+      setActionSuccessMsg(`ยกเลิกคำสั่งซื้อ ${targetOrder.id} แล้ว`);
       setTimeout(() => setActionSuccessMsg(''), 4000);
     } finally {
       setIsProcessing(false);
@@ -931,6 +938,51 @@ export const OrdersManagementView: React.FC<OrdersManagementViewProps> = ({
                       <span>ยืนยันรับของเข้าคลัง</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* Cancel Order Confirmation Modal */}
+      {cancellingOrder && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm">
+            <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-red-500/15 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                  <XCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    ยืนยันการยกเลิกคำสั่งซื้อ
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    ใบสั่งซื้อ: {cancellingOrder.id}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                คุณแน่ใจหรือไม่ว่าต้องการยกเลิกคำสั่งซื้อ <strong className="text-slate-900 dark:text-white">"{cancellingOrder.itemName}"</strong>?
+              </p>
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={() => setCancellingOrder(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  ไม่ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={handleConfirmCancelOrder}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs shadow-md shadow-red-500/25 flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                  <span>ยืนยันยกเลิก</span>
                 </button>
               </div>
             </div>

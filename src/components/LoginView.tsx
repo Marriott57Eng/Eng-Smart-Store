@@ -232,56 +232,56 @@ const generateSafeUUID = () => {
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-slate-900 dark:bg-slate-950 flex items-center justify-center p-3.5 sm:p-6 pl-safe pr-safe selection:bg-blue-500 selection:text-white transition-colors overflow-y-auto relative">
-      {/* iOS 27 Ambient Light Orbs for Liquid Glass Refraction */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-600/25 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 left-1/3 w-80 h-80 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-2/3 right-1/4 w-72 h-72 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
+    <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-slate-100 via-blue-50/40 to-indigo-100/50 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/60 flex items-center justify-center p-4 sm:p-6 pl-safe pr-safe selection:bg-blue-600 selection:text-white transition-colors overflow-y-auto relative">
+      {/* Soft ambient radial glows */}
+      <div className="fixed -top-24 -left-24 w-96 h-96 bg-blue-500/15 dark:bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="fixed -bottom-24 -right-24 w-96 h-96 bg-indigo-500/15 dark:bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="w-full max-w-md my-auto liquid-glass rounded-[32px] sm:rounded-[38px] shadow-[0_25px_70px_-15px_rgba(0,0,0,0.6)] flex flex-col p-6 sm:p-9 pt-safe-content justify-center relative overflow-hidden border border-white/70 dark:border-white/12 transition-all">
-        {/* Specular top rim shine */}
-        <div className="absolute top-0 left-10 right-10 h-[1.5px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/30 to-transparent pointer-events-none rounded-full" />
-        
-        {/* Ambient top liquid tint */}
-        <div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-b from-blue-500/15 via-blue-500/5 to-transparent rounded-b-[40px] pointer-events-none" />
+      <div className="w-full max-w-md my-auto liquid-glass-card rounded-[32px] shadow-2xl flex flex-col p-6 sm:p-8 pt-safe-content justify-center relative overflow-hidden transition-all">
+        {/* Top gradient highlight */}
+        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-500" />
 
-        <div className="relative z-10 flex flex-col items-center mb-5 sm:mb-7">
-          <div className="w-full max-w-[500px] h-20 sm:h-[130px] flex items-center justify-center mb-3 sm:mb-5 overflow-hidden rounded-2xl">
+        <div className="relative z-10 flex flex-col items-center mb-6">
+          <div className="w-full max-w-[500px] h-24 sm:h-[130px] flex items-center justify-center mb-4 overflow-hidden rounded-2xl bg-slate-950/5 dark:bg-slate-950/40 p-2 border border-slate-200/70 dark:border-slate-800/80">
             <EngLogo
               alt="ENG Smart Store Logo"
               style={{ width: '500px', maxWidth: '100%', height: '100%', maxHeight: '130px' }}
-              className="object-contain drop-shadow-md rounded-2xl"
+              className="object-contain rounded-xl"
             />
           </div>
-          <h1
-            style={{ fontSize: '21px', fontStyle: 'normal', fontFamily: "'Fredericka the Great', cursive", textDecorationLine: 'none', textAlign: 'center' }}
-            className="font-bold text-slate-900 dark:text-white mb-1 tracking-tight drop-shadow-xs"
-          >
-            ENG Smart Store App
-          </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm font-medium">เข้าสู่ระบบเพื่อจัดการคลังสินค้า</p>
+
+          <div className="text-center space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent tracking-tight">
+              ENG Smart Store
+            </h1>
+            <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm font-medium">
+              ระบบจัดการคลังอะไหล่ช่าง · Store FL.6
+            </p>
+          </div>
         </div>
 
         {error && (
-          <div className="mb-4 sm:mb-6 p-3.5 sm:p-4 bg-red-50/90 dark:bg-red-950/60 border border-red-200/80 dark:border-red-800/80 rounded-2xl flex items-start gap-3 text-red-700 dark:text-red-300 relative z-10 backdrop-blur-md shadow-xs">
-            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
-            <span className="text-sm font-medium leading-relaxed">{error}</span>
+          <div className="mb-5 p-3.5 bg-red-500/10 border border-red-400/40 rounded-2xl flex items-start gap-2.5 text-red-700 dark:text-red-300 relative z-10">
+            <AlertCircle className="w-4.5 h-4.5 shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+            <span className="text-xs sm:text-sm font-medium leading-relaxed">{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="relative z-10 flex flex-col gap-4 sm:gap-5">
+        <form onSubmit={handleLogin} className="relative z-10 flex flex-col gap-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 ml-1">รหัสพนักงาน หรือ ชื่อจริง</label>
+            <label className="block text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200">
+              รหัสพนักงาน หรือ ชื่อ-นามสกุล
+            </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <UserIcon className="h-5 w-5 text-slate-400" />
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <UserIcon className="h-4.5 w-4.5 text-slate-400" />
               </div>
               <input
                 type="text"
                 value={loginInput}
                 onChange={(e) => setLoginInput(e.target.value)}
-                className="block w-full pl-11 pr-4 py-3.5 bg-white/60 dark:bg-slate-800/60 border border-slate-200/80 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 transition-all text-slate-900 dark:text-white outline-none placeholder:text-slate-400 backdrop-blur-md shadow-xs text-base"
-                placeholder="กรอกรหัสพนักงาน หรือ ชื่อจริง"
+                className="block w-full pl-10 pr-4 py-3.5 liquid-glass-input rounded-2xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-slate-900 dark:text-white outline-none placeholder:text-slate-400 text-sm sm:text-base font-medium"
+                placeholder="กรอกรหัสพนักงาน หรือ ชื่อของคุณ..."
                 disabled={loading}
                 autoFocus
               />
@@ -291,17 +291,19 @@ const generateSafeUUID = () => {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 w-full bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] disabled:opacity-70 text-white font-bold py-4 px-4 rounded-2xl shadow-lg shadow-blue-500/30 transition-all flex items-center justify-center gap-2 cursor-pointer border border-blue-400/40 relative overflow-hidden"
+            className="mt-1 w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] disabled:opacity-70 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            {/* Liquid specular shine overlay */}
-            <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent pointer-events-none" />
             {loading ? (
-              <Loader2 className="w-5 h-5 animate-spin relative z-10" />
+              <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
-              <span className="relative z-10 text-base">เข้าสู่ระบบ</span>
+              <span className="text-sm sm:text-base">เข้าสู่ระบบ</span>
             )}
           </button>
         </form>
+
+        <div className="mt-6 pt-4 border-t border-slate-200/70 dark:border-slate-800/80 text-center text-xs text-slate-400 dark:text-slate-500">
+          MH57 Engineering · Store FL.6
+        </div>
       </div>
     </div>
   );

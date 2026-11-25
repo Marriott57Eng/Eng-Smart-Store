@@ -256,9 +256,12 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
       await saveLineConfig(config, currentUser.name || currentUser.username, currentUser.role || 'admin');
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving LINE config:', err);
-      alert('เกิดข้อผิดพลาดในการบันทึกการตั้งค่า LINE');
+      setTestResult({
+        success: false,
+        error: err?.message || 'เกิดข้อผิดพลาดในการบันทึกการตั้งค่า LINE',
+      });
     } finally {
       setSaving(false);
     }

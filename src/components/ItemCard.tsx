@@ -35,9 +35,18 @@ export const ItemCard: React.FC<ItemCardProps> = React.memo(({
   onToggleFavorite,
 }) => {
   // Long press detection for selecting multiple items
-  const longPressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPressTriggeredRef = React.useRef(false);
   const startPosRef = React.useRef<{ x: number; y: number } | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;

@@ -37,6 +37,31 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function () {
+        if (!('caches' in window) || !('serviceWorker' in navigator)) return;
+        caches.keys().then(function (keys) {
+          var stale = keys.filter(function (k) {
+            return k.indexOf('eng-store-') === 0 && k.indexOf('-v6') === -1;
+          });
+          if (stale.length > 0) {
+            Promise.all(stale.map(function (k) { return caches.delete(k); }))
+              .then(function () {
+                return navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(function (reg) {
+                  return reg.update();
+                });
+              })
+              .catch(function () {})
+              .finally(function () {
+                if (!sessionStorage.getItem('eng_sw_v6_reloaded')) {
+                  sessionStorage.setItem('eng_sw_v6_reloaded', '1');
+                  window.location.reload();
+                }
+              });
+          }
+        }).catch(function () {});
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

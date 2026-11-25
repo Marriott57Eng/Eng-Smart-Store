@@ -21,6 +21,25 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error in application:', error, errorInfo);
+
+    // Auto-recover once if a stale cached module chunk caused a React hook/dispatcher mismatch
+    const msg = error?.message || '';
+    const isStaleChunkOrHookMismatch =
+      msg.includes("reading 'useState'") ||
+      msg.includes("reading 'useEffect'") ||
+      msg.includes("reading 'useContext'") ||
+      msg.includes('Invalid hook call') ||
+      msg.includes('Failed to fetch dynamically imported module');
+
+    if (isStaleChunkOrHookMismatch && typeof window !== 'undefined') {
+      try {
+        const lastReload = Number(sessionStorage.getItem('eng_auto_reload_ts') || '0');
+        if (Date.now() - lastReload > 10000) {
+          sessionStorage.setItem('eng_auto_reload_ts', String(Date.now()));
+          window.location.reload();
+        }
+      } catch (_) {}
+    }
   }
 
   public render() {
@@ -36,15 +55,23 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="text-sm text-slate-400 max-w-md mb-6">
             {this.state.error?.message || 'ระบบเกิดข้อผิดพลาดชั่วคราว'}
           </p>
-          <button
-            onClick={() => {
-              try { localStorage.clear(); } catch (_) {}
-              window.location.reload();
-            }}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl shadow-lg transition-all cursor-pointer"
-          >
-            รีโหลดและรีเซ็ตระบบ
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl shadow-lg transition-all cursor-pointer"
+            >
+              โหลดหน้าใหม่
+            </button>
+            <button
+              onClick={() => {
+                try { localStorage.clear(); } catch (_) {}
+                window.location.reload();
+              }}
+              className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl border border-slate-700 transition-all cursor-pointer"
+            >
+              รีเซ็ตแคชและเข้าใหม่
+            </button>
+          </div>
         </div>
       );
     }

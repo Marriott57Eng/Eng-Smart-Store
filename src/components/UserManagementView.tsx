@@ -24,6 +24,7 @@ import { collection, getDocs, doc, deleteDoc, updateDoc, setDoc, getDoc } from '
 import { User as UserType } from '../types';
 import { initialUsers } from '../data/users';
 import { LineSettingsModal } from './LineSettingsModal';
+import { ModalPortal } from './ModalPortal';
 
 interface UserManagementViewProps {
   currentUser: UserType;
@@ -102,8 +103,16 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    tone: 'danger' | 'warning' | 'info';
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
-  useScrollLock(Boolean(editingUser));
+  useScrollLock(Boolean(editingUser || confirmDialog));
 
   useEffect(() => {
     fetchUsers();
@@ -372,33 +381,39 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     }
   };
 
-  const handleDeleteUser = async (userId: string, userName: string) => {
+  const handleDeleteUser = (userId: string, userName: string) => {
     if (userId === currentUser.id) {
-      alert('ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่ได้');
+      setError('ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่ได้');
       return;
     }
-    if (window.confirm(`คุณแน่ใจหรือไม่ที่จะลบผู้ใช้ "${userName}" (ID: ${userId}) ออกจากระบบ?`)) {
-      try {
-        await deleteDoc(doc(db, 'users', userId));
-        setUsers(prev => {
-          const next = prev.filter(u => u.id !== userId);
-          try {
-            localStorage.setItem('warehouse_cached_users', JSON.stringify(next));
-          } catch (_) {}
-          return next;
-        });
-        setSuccessMsg(`ลบผู้ใช้ "${userName}" เรียบร้อยแล้ว`);
-        setTimeout(() => setSuccessMsg(''), 4000);
-      } catch (err) {
-        console.error("Error deleting user:", err);
-        alert('เกิดข้อผิดพลาดในการลบผู้ใช้');
-      }
-    }
+    setConfirmDialog({
+      title: 'ยืนยันการลบผู้ใช้งาน',
+      message: `คุณแน่ใจหรือไม่ที่จะลบผู้ใช้ "${userName}" (ID: ${userId}) ออกจากระบบ?`,
+      confirmLabel: 'ลบผู้ใช้',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'users', userId));
+          setUsers(prev => {
+            const next = prev.filter(u => u.id !== userId);
+            try {
+              localStorage.setItem('warehouse_cached_users', JSON.stringify(next));
+            } catch (_) {}
+            return next;
+          });
+          setSuccessMsg(`ลบผู้ใช้ "${userName}" เรียบร้อยแล้ว`);
+          setTimeout(() => setSuccessMsg(''), 4000);
+        } catch (err) {
+          console.error("Error deleting user:", err);
+          setError('ไม่สามารถลบผู้ใช้ได้ (สิทธิ์ฐานข้อมูลจำกัดการลบ)');
+        }
+      },
+    });
   };
 
-  const handleRoleChange = async (user: UserType, newRole: 'admin' | 'user') => {
+  const handleRoleChange = (user: UserType, newRole: 'admin' | 'user') => {
     if (user.id === currentUser.id) {
-      alert('ไม่สามารถเปลี่ยนสิทธิ์ของตนเองผ่านปุ่มลัดได้ (กรุณาใช้เมนูแก้ไขข้อมูล)');
+      setError('ไม่สามารถเปลี่ยนสิทธิ์ของตนเองผ่านปุ่มลัดได้ (กรุณาใช้เมนูแก้ไขข้อมูล)');
       return;
     }
     
@@ -408,30 +423,36 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       ? `ต้องการตั้งค่า ${user.name} เป็น "ผู้ดูแลระบบ (Admin)" ใช่หรือไม่?`
       : `ต้องการเปลี่ยน ${user.name} เป็น "ผู้ใช้ทั่วไป (User)" ใช่หรือไม่?`;
 
-    if (window.confirm(confirmMessage)) {
-      setUpdating(user.id);
-      try {
-        await updateDoc(doc(db, 'users', user.id), { role: newRole });
-        setUsers(prev => {
-          const next = prev.map(u => u.id === user.id ? { ...u, role: newRole } : u).sort((a, b) => {
-            if (a.role === 'admin' && b.role !== 'admin') return -1;
-            if (a.role !== 'admin' && b.role === 'admin') return 1;
-            return (a.id || '').localeCompare(b.id || '');
+    setConfirmDialog({
+      title: 'ยืนยันการเปลี่ยนสิทธิ์ผู้ใช้',
+      message: confirmMessage,
+      confirmLabel: 'ยืนยันเปลี่ยนสิทธิ์',
+      tone: 'warning',
+      onConfirm: async () => {
+        setUpdating(user.id);
+        try {
+          await updateDoc(doc(db, 'users', user.id), { role: newRole });
+          setUsers(prev => {
+            const next = prev.map(u => u.id === user.id ? { ...u, role: newRole } : u).sort((a, b) => {
+              if (a.role === 'admin' && b.role !== 'admin') return -1;
+              if (a.role !== 'admin' && b.role === 'admin') return 1;
+              return (a.id || '').localeCompare(b.id || '');
+            });
+            try {
+              localStorage.setItem('warehouse_cached_users', JSON.stringify(next));
+            } catch (_) {}
+            return next;
           });
-          try {
-            localStorage.setItem('warehouse_cached_users', JSON.stringify(next));
-          } catch (_) {}
-          return next;
-        });
-        setSuccessMsg(`เปลี่ยนสิทธิ์ของ ${user.name} เป็น ${newRole.toUpperCase()} เรียบร้อยแล้ว`);
-        setTimeout(() => setSuccessMsg(''), 4000);
-      } catch (err) {
-        console.error("Error updating role:", err);
-        alert('เกิดข้อผิดพลาดในการเปลี่ยนสิทธิ์');
-      } finally {
-        setUpdating(null);
-      }
-    }
+          setSuccessMsg(`เปลี่ยนสิทธิ์ของ ${user.name} เป็น ${newRole.toUpperCase()} เรียบร้อยแล้ว`);
+          setTimeout(() => setSuccessMsg(''), 4000);
+        } catch (err) {
+          console.error("Error updating role:", err);
+          setError('เกิดข้อผิดพลาดในการเปลี่ยนสิทธิ์ผู้ใช้');
+        } finally {
+          setUpdating(null);
+        }
+      },
+    });
   };
 
   const filteredUsers = users.filter((u) => {
@@ -789,16 +810,32 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                     {/* Unlock / Force logout button */}
                     {!isSelf && user.activeDeviceId && (
                       <button
-                        onClick={async () => {
-                          if (window.confirm(`ปลดล็อกเซสชั่นของ ${user.name} หรือไม่? (ใช้กรณีที่ผู้ใช้ออกจากระบบจากเครื่องเดิมไม่ได้)`)) {
-                            try {
-                              await updateDoc(doc(db, 'users', user.id), { activeDeviceId: '', sessionToken: '' });
-                              setSuccessMsg(`ปลดล็อกเซสชั่นของ ${user.name} เรียบร้อยแล้ว`);
-                              setTimeout(() => setSuccessMsg(''), 4000);
-                            } catch (err) {
-                              console.error('Unlock error:', err);
-                            }
-                          }
+                        onClick={() => {
+                          setConfirmDialog({
+                            title: 'ยืนยันปลดล็อกเซสชั่น',
+                            message: `ปลดล็อกเซสชั่นของ ${user.name} หรือไม่? (ใช้กรณีที่ผู้ใช้ออกจากระบบจากเครื่องเดิมไม่ได้)`,
+                            confirmLabel: 'ปลดล็อกเซสชั่น',
+                            tone: 'warning',
+                            onConfirm: async () => {
+                              try {
+                                await updateDoc(doc(db, 'users', user.id), { activeDeviceId: '', sessionToken: '' });
+                                setUsers(prev => {
+                                  const next = prev.map(u =>
+                                    u.id === user.id ? { ...u, activeDeviceId: '', sessionToken: '' } : u
+                                  );
+                                  try {
+                                    localStorage.setItem('warehouse_cached_users', JSON.stringify(next));
+                                  } catch (_) {}
+                                  return next;
+                                });
+                                setSuccessMsg(`ปลดล็อกเซสชั่นของ ${user.name} เรียบร้อยแล้ว`);
+                                setTimeout(() => setSuccessMsg(''), 4000);
+                              } catch (err) {
+                                console.error('Unlock error:', err);
+                                setError('ไม่สามารถปลดล็อกเซสชั่นได้ กรุณาลองใหม่อีกครั้ง');
+                              }
+                            },
+                          });
                         }}
                         className="w-8 h-8 flex items-center justify-center text-amber-500 hover:text-amber-600 liquid-glass-pill hover:bg-amber-500/15 rounded-xl transition-colors border border-amber-400/30 cursor-pointer shadow-2xs"
                         title="ปลดล็อกเซสชั่น (Force Logout)"
@@ -979,6 +1016,62 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* In-App Confirmation Dialog */}
+      {confirmDialog && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm">
+            <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                  confirmDialog.tone === 'danger'
+                    ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                    : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                }`}>
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  {confirmDialog.title}
+                </h3>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                {confirmDialog.message}
+              </p>
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={() => setConfirmDialog(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={async () => {
+                    try {
+                      setConfirmBusy(true);
+                      await confirmDialog.onConfirm();
+                      setConfirmDialog(null);
+                    } finally {
+                      setConfirmBusy(false);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-white font-bold text-xs shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50 ${
+                    confirmDialog.tone === 'danger'
+                      ? 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 shadow-red-500/25'
+                      : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-amber-500/25'
+                  }`}
+                >
+                  {confirmBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{confirmDialog.confirmLabel}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* LINE Settings Modal */}

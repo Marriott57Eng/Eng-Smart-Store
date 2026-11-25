@@ -62,15 +62,31 @@ export const playSuccessChime = () => {
   }
 };
 
+let pendingSpeechTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingVoicesFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSpeechTimestamp = 0;
+
 /**
- * Speaks text in Thai using browser Web Speech API
+ * Speaks text in Thai using browser Web Speech API (strictly once per call)
  */
-export const speakThai = (text: string) => {
+export const speakThai = (text: string, force: boolean = false) => {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return;
   }
 
+  const now = Date.now();
+  // Prevent duplicate speech calls firing within 1.8s unless explicitly forced (e.g. replay button)
+  if (!force && now - lastSpeechTimestamp < 1800) {
+    return;
+  }
+  lastSpeechTimestamp = now;
+
   try {
+    if (pendingVoicesFallbackTimer) {
+      clearTimeout(pendingVoicesFallbackTimer);
+      pendingVoicesFallbackTimer = null;
+    }
+    window.speechSynthesis.onvoiceschanged = null;
     window.speechSynthesis.cancel(); // Stop any pending speech
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -79,7 +95,17 @@ export const speakThai = (text: string) => {
     utterance.pitch = 1.05;
     utterance.volume = 1.0;
 
+    let hasExecuted = false;
     const executeSpeak = () => {
+      if (hasExecuted) return;
+      hasExecuted = true;
+
+      if (pendingVoicesFallbackTimer) {
+        clearTimeout(pendingVoicesFallbackTimer);
+        pendingVoicesFallbackTimer = null;
+      }
+      window.speechSynthesis.onvoiceschanged = null;
+
       try {
         const voices = window.speechSynthesis.getVoices();
         const thaiVoice = voices.find(
@@ -88,6 +114,7 @@ export const speakThai = (text: string) => {
         if (thaiVoice) {
           utterance.voice = thaiVoice;
         }
+        window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
       } catch (err) {
         console.warn('SpeechSynthesis speak error:', err);
@@ -102,7 +129,7 @@ export const speakThai = (text: string) => {
         executeSpeak();
       };
       // Fallback timeout in case onvoiceschanged does not fire
-      setTimeout(executeSpeak, 120);
+      pendingVoicesFallbackTimer = setTimeout(executeSpeak, 150);
     }
   } catch (e) {
     console.warn('Speech synthesis error:', e);
@@ -110,15 +137,29 @@ export const speakThai = (text: string) => {
 };
 
 /**
- * Plays chime + speaks text in Thai
+ * Plays chime + speaks text in Thai (debounced so it never speaks multiple times for one action)
  */
 export const playSuccessSoundAndSpeak = (
-  speechText: string = 'ทำรายการเรียบร้อยแล้วค่ะ'
+  speechText: string = 'ทำรายการเรียบร้อยแล้วค่ะ',
+  force: boolean = false
 ) => {
+  const now = Date.now();
+  if (!force && now - lastSpeechTimestamp < 1800) {
+    return;
+  }
+  lastSpeechTimestamp = now;
+
+  if (pendingSpeechTimer) {
+    clearTimeout(pendingSpeechTimer);
+    pendingSpeechTimer = null;
+  }
+
   playSuccessChime();
   // Delay speech slightly so chime finishes initial attack
-  setTimeout(() => {
-    speakThai(speechText);
+  pendingSpeechTimer = setTimeout(() => {
+    pendingSpeechTimer = null;
+    speakThai(speechText, true);
   }, 120);
 };
+
 

@@ -62,15 +62,21 @@ export const RequisitionModal: React.FC<RequisitionModalProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
+  const isSubmittingRef = useRef(false);
+  const wasOpenRef = useRef(false);
+  const lastPreselectedIdRef = useRef<string | null>(null);
 
-  // Initialize and reset fields
+  // Initialize and reset fields only when modal opens or preselected item changes
   useEffect(() => {
-    if (isOpen) {
+    const preselectedId = preselectedItem?.id || null;
+    if (isOpen && (!wasOpenRef.current || lastPreselectedIdRef.current !== preselectedId)) {
+      isSubmittingRef.current = false;
       const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, '0');
       setDateStr(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
       setTimeStr(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
       setQty(1);
+      setNote('');
       setError('');
       setIsDropdownOpen(false);
       setShowAdvancedOptions(false);
@@ -89,8 +95,13 @@ export const RequisitionModal: React.FC<RequisitionModalProps> = ({
         setSelectedItemId(items[0].id);
         setItemSearchQuery(`${items[0].name} (${items[0].id})`);
       }
+      lastPreselectedIdRef.current = preselectedId;
     }
-  }, [isOpen, preselectedItem, items]);
+    if (!isOpen) {
+      lastPreselectedIdRef.current = null;
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen, preselectedItem, currentUser.name]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -139,6 +150,7 @@ export const RequisitionModal: React.FC<RequisitionModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingRef.current) return;
     if (!currentItem) {
       triggerHapticFeedback([40, 50, 40]);
       setError('กรุณาเลือกรายการสินค้า');
@@ -165,6 +177,8 @@ export const RequisitionModal: React.FC<RequisitionModalProps> = ({
       setError(`กรุณาระบุ${transactionType === 'out' ? 'งานหรือสถานที่ที่นำไปใช้' : 'แหล่งที่มาหรือเหตุผลการรับเข้า'}`);
       return;
     }
+
+    isSubmittingRef.current = true;
 
     // Physical haptic vibration confirmation for successful action
     triggerHapticFeedback([50, 40, 60]);

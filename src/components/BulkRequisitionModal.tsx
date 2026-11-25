@@ -50,28 +50,41 @@ export const BulkRequisitionModal: React.FC<BulkRequisitionModalProps> = ({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Initialize and reset fields
+  const wasOpenRef = React.useRef(false);
+
+  // Initialize form fields once when modal opens (never wipe purpose/note during Firestore real-time updates)
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
       const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, '0');
       setDateStr(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
       setTimeStr(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
       setError('');
+      setNote('');
       setIsSubmitting(false);
       setRequestedBy(currentUser.name || 'ผู้ใช้งาน');
       setPurpose('งานซ่อมบำรุงประจำวัน');
-
-      // Initialize quantities: default to 1 (or 0 if out of stock)
-      const initialQtys: Record<string, number> = {};
-      selectedItems.forEach(item => {
-        initialQtys[item.id] = quantities[item.id] !== undefined 
-          ? Math.min(quantities[item.id], Math.max(1, item.qty))
-          : (item.qty > 0 ? 1 : 0);
-      });
-      setQuantities(initialQtys);
     }
-  }, [isOpen, selectedItems, currentUser]);
+    wasOpenRef.current = isOpen;
+  }, [isOpen, currentUser.name]);
+
+  // Keep quantities map synced when selectedItems changes without resetting other form fields
+  useEffect(() => {
+    if (!isOpen) return;
+    setQuantities((prev) => {
+      const next: Record<string, number> = {};
+      selectedItems.forEach((item) => {
+        if (item.qty <= 0) {
+          next[item.id] = 0;
+        } else if (prev[item.id] !== undefined && prev[item.id] > 0) {
+          next[item.id] = Math.min(prev[item.id], item.qty);
+        } else {
+          next[item.id] = 1;
+        }
+      });
+      return next;
+    });
+  }, [isOpen, selectedItems]);
 
   if (!isOpen) return null;
 

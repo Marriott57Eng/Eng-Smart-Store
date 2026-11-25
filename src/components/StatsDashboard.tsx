@@ -296,38 +296,38 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
   };
 
   return (
-    <div className="p-3.5 sm:p-5 md:p-6 pt-3 sm:pt-4 space-y-4.5 pb-28 sm:pb-32 max-w-7xl mx-auto w-full transition-colors duration-200">
-      {/* Sub-Navigation Switcher (ภาพรวมสถิติ vs หมวดหมู่สินค้า) */}
+    <div className="p-3.5 sm:p-5 md:p-6 pt-3 sm:pt-4 space-y-4 pb-28 sm:pb-32 max-w-7xl mx-auto w-full transition-colors duration-200">
+      {/* Sub-Navigation Switcher (ภาพรวมคลัง vs หมวดหมู่สินค้า) */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5 p-1 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+        <div className="flex items-center gap-1 p-1 liquid-glass-pill rounded-full shadow-2xs">
           <button
             type="button"
             onClick={() => setViewMode('overview')}
-            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
               viewMode === 'overview'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/25'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             <BarChart3 className="w-4 h-4" />
-            <span>ภาพรวมสถิติ</span>
+            <span>ภาพรวมคลัง</span>
           </button>
 
           <button
             type="button"
             onClick={() => setViewMode('categories')}
-            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
               viewMode === 'categories'
-                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-500/25'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-600/25'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             <Boxes className="w-4 h-4" />
             <span>หมวดหมู่สินค้า</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
               viewMode === 'categories'
-                ? 'bg-white/20 text-white'
-                : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                ? 'bg-white/25 text-white'
+                : 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300'
             }`}>
               {summary?.categories.length || 0}
             </span>
@@ -338,10 +338,10 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('overview')}
-            className="px-3.5 py-2 rounded-2xl liquid-glass-pill hover:bg-white/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer shadow-xs border border-white/60 dark:border-white/10"
+            className="px-4 py-1.5 rounded-full liquid-glass-pill text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-all"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>กลับไปหน้าภาพรวมสถิติ</span>
+            <span>กลับหน้าภาพรวม</span>
           </button>
         )}
       </div>
@@ -357,75 +357,80 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
         </div>
       ) : (
         <>
-          {/* Top Header Card */}
-          <div className="liquid-glass-card rounded-[32px] p-5 sm:p-6 shadow-xl relative overflow-hidden border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 w-full min-w-0">
-            {/* Specular top highlight */}
-            <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/25 to-transparent pointer-events-none rounded-full" />
+          {/* Vibrant Gradient Summary Hero Banner */}
+          <div className="rounded-3xl p-5 sm:p-6 shadow-xl shadow-blue-600/20 relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 text-white w-full min-w-0">
+            <div className="absolute -top-16 -right-16 w-48 h-48 bg-white/15 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute -bottom-20 -left-16 w-48 h-48 bg-cyan-400/20 rounded-full blur-2xl pointer-events-none" />
 
             <div className="flex items-center justify-between mb-3 relative z-10 flex-wrap gap-2">
               <div>
-                <span className="text-xs text-blue-600 dark:text-blue-400 font-extrabold tracking-wider uppercase">
-                  Store Database
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 backdrop-blur-xs text-[11px] font-bold text-blue-100 border border-white/20 mb-1.5">
+                  ENG Smart Store · Store FL.6
                 </span>
-                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">ภาพรวมคลังสินค้า</h1>
+                <h1 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                  ภาพรวมคลังอะไหล่ช่าง
+                </h1>
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Button to open Categories in Overview */}
                 <button
                   type="button"
                   onClick={() => setViewMode('categories')}
-                  className="px-3 sm:px-3.5 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 active:scale-95 transition-all text-xs sm:text-sm font-bold flex items-center gap-1.5 border border-indigo-200 dark:border-indigo-800/60 shadow-2xs cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-xs text-white active:scale-95 transition-all text-xs font-bold flex items-center gap-1.5 border border-white/25 cursor-pointer"
                   title="เปิดดูหมวดหมู่สินค้าทั้งหมด"
                 >
-                  <Boxes className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <Boxes className="w-3.5 h-3.5" />
                   <span>หมวดหมู่ ({summary?.categories.length || 0})</span>
                 </button>
 
                 <button
                   onClick={onRefresh}
                   disabled={loading}
-                  className="px-3.5 py-2 rounded-2xl liquid-glass-pill hover:bg-white/80 dark:hover:bg-slate-700 active:scale-95 transition-all text-slate-800 dark:text-slate-100 flex items-center gap-1.5 text-xs sm:text-sm font-bold border border-white/60 dark:border-white/10 shadow-2xs cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-xs active:scale-95 transition-all text-white flex items-center gap-1.5 text-xs font-bold border border-white/25 cursor-pointer"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                  <span>ซิงค์ชีต</span>
+                  <span>รีเฟรช</span>
                 </button>
               </div>
             </div>
 
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mb-4.5 leading-relaxed">
-              เชื่อมต่อกับ Store Data คลัง Store FL.6 พร้อมอัปเดตและมี AI วิเคราะห์ข้อมูลอัตโนมัติ
+            <p className="text-xs sm:text-sm text-blue-100/90 mb-4 leading-relaxed relative z-10">
+              ติดตามจำนวนคงเหลือ อะไหล่ใกล้หมด และสถิติการเบิก-รับประจำคลังแบบเรียลไทม์
             </p>
 
-            {/* 3 Key Metric Blocks */}
-            <div className="grid grid-cols-3 gap-2.5 relative z-10">
-              <div className="liquid-glass-pill rounded-2xl p-3 sm:p-3.5 border-2 border-slate-200 dark:border-slate-700 text-center shadow-xs">
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block font-semibold">สินค้าทั้งหมด</span>
-                <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tabular-nums">
+            {/* 3 Translucent Key Metric Blocks */}
+            <div className="grid grid-cols-3 gap-2.5 sm:gap-3 relative z-10">
+              <div className="rounded-2xl p-3.5 sm:p-4 bg-white/15 backdrop-blur-xs border border-white/20">
+                <span className="text-[11px] font-bold text-blue-100 block">
+                  รายการอะไหล่ทั้งหมด
+                </span>
+                <span className="text-xl sm:text-3xl font-black text-white tabular-nums mt-1 block">
                   {(summary?.totalItems || items.length).toLocaleString()}
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">SKUs</span>
+                <span className="text-[11px] text-blue-100/80 block font-medium mt-0.5">รายการในคลัง</span>
               </div>
 
               <div 
                 onClick={onFilterLowStock}
-                className="bg-amber-500/15 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-600 text-amber-900 dark:text-amber-200 rounded-2xl p-3 sm:p-3.5 text-center cursor-pointer active:scale-95 transition-all shadow-xs backdrop-blur-md"
+                className="rounded-2xl p-3.5 sm:p-4 bg-amber-400/20 hover:bg-amber-400/30 backdrop-blur-xs border border-amber-300/40 cursor-pointer active:scale-[0.98] transition-all"
               >
-                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-tight block truncate">
-                  ใกล้หมด/หมดแล้ว
+                <span className="text-[11px] font-bold text-amber-100 block truncate">
+                  ใกล้หมด / หมดสต็อก
                 </span>
-                <span className="text-xl sm:text-2xl font-black tabular-nums">
+                <span className="text-xl sm:text-3xl font-black tabular-nums text-amber-200 mt-1 block">
                   {lowStockItems.length.toLocaleString()}
                 </span>
-                <span className="text-[10px] sm:text-xs opacity-90 block font-bold">กดดูรายการ &gt;</span>
+                <span className="text-[11px] text-amber-100 block font-bold mt-0.5">แตะดูรายการ &rarr;</span>
               </div>
 
-              <div className="liquid-glass-pill rounded-2xl p-3 sm:p-3.5 border-2 border-slate-200 dark:border-slate-700 text-center shadow-xs">
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block font-semibold">จำนวนรวม</span>
-                <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tabular-nums">
+              <div className="rounded-2xl p-3.5 sm:p-4 bg-white/15 backdrop-blur-xs border border-white/20">
+                <span className="text-[11px] font-bold text-blue-100 block">
+                  จำนวนคงเหลือรวม
+                </span>
+                <span className="text-xl sm:text-3xl font-black text-white tabular-nums mt-1 block">
                   {(summary?.totalQty || 0).toLocaleString()}
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">หน่วย</span>
+                <span className="text-[11px] text-blue-100/80 block font-medium mt-0.5">ชิ้น/หน่วยรวม</span>
               </div>
             </div>
           </div>
@@ -433,65 +438,67 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
           {/* Dedicated Category Mode Banner Card in Overview */}
           <div 
             onClick={() => setViewMode('categories')}
-            className="liquid-glass-card rounded-[28px] p-4 sm:p-5 border-2 border-indigo-400/60 dark:border-indigo-500/50 bg-gradient-to-r from-indigo-500/10 via-blue-500/5 to-purple-500/10 flex items-center justify-between cursor-pointer hover:border-indigo-500 active:scale-[0.99] transition-all shadow-md group w-full min-w-0"
+            className="rounded-2xl p-4 liquid-glass-card flex items-center justify-between cursor-pointer hover:border-blue-400/60 active:scale-[0.99] transition-all group w-full min-w-0"
           >
             <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/25 border border-indigo-400/30 shrink-0 group-hover:scale-105 transition-transform">
-                <Boxes className="w-6 h-6" />
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                <Boxes className="w-5 h-5" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-slate-900 dark:text-slate-100 text-sm sm:text-base">
-                    หมวดหมู่สินค้าในคลัง (Categories)
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm sm:text-base">
+                    ดูสินค้าแยกตามหมวดหมู่
                   </h3>
-                  <span className="text-[10px] bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-extrabold px-2.5 py-0.5 rounded-full border border-indigo-400/30">
-                    {summary?.categories.length || 0} หมวด
+                  <span className="text-[11px] bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 font-bold px-2.5 py-0.5 rounded-full">
+                    {summary?.categories.length || 0} หมวดหมู่
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  แตะเพื่อเปิดดูสินค้าแยกตามหมวดหมู่งานและรูปภาพประกอบ
+                  เลือกดูรายการอะไหล่และยอดคงเหลือตามประเภทงานช่าง
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-1 text-xs sm:text-sm font-bold text-indigo-600 dark:text-indigo-400 shrink-0 group-hover:translate-x-1 transition-transform pr-1">
-              <span>เปิดดูหมวด</span>
+            <div className="flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 shrink-0 group-hover:translate-x-0.5 transition-transform pr-1">
+              <span>เปิดดู</span>
               <ChevronRight className="w-4 h-4" />
             </div>
           </div>
 
       {/* AI Quick Insight Prompt Card */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5">
       <div 
         onClick={handleInlineAnalysis}
-        className="liquid-glass-card border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-[28px] p-4 sm:p-5 flex items-center justify-between cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 active:scale-[0.99] transition-all shadow-md"
+        className="liquid-glass-card rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-indigo-400/60 active:scale-[0.99] transition-all"
       >
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/25 border border-blue-400/40 shrink-0">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/25 shrink-0">
             <Sparkles className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-extrabold text-slate-900 dark:text-slate-100 text-base sm:text-lg">AI Smart Analysis</h3>
-              <span className="text-[10px] bg-blue-500/15 text-blue-700 dark:text-blue-300 font-extrabold px-2.5 py-0.5 rounded-full border border-blue-400/30">
-                Ai
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm sm:text-base">
+                ให้ AI ช่วยวิเคราะห์สถานะคลังสินค้า
+              </h3>
+              <span className="text-[11px] bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-bold px-2.5 py-0.5 rounded-full">
+                AI ช่วยวิเคราะห์
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">แตะเพื่อให้ Ai วิเคราะห์สถานะคลังสินค้า</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">แตะเพื่อสรุปภาพรวม อะไหล่ที่เบิกบ่อย และรายการที่ควรสั่งซื้อเพิ่ม</p>
           </div>
         </div>
-        {isAnalyzing ? <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" /> : (showAnalysis ? <ChevronUp className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" /> : <ChevronDown className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />)}
+        {isAnalyzing ? <Loader2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400 animate-spin shrink-0" /> : (showAnalysis ? <ChevronUp className="w-5 h-5 text-slate-500 dark:text-slate-400 shrink-0" /> : <ChevronDown className="w-5 h-5 text-slate-500 dark:text-slate-400 shrink-0" />)}
       </div>
       
       {showAnalysis && (
-        <div className="liquid-glass-card border-2 border-blue-500/40 dark:border-blue-500/50 bg-white dark:bg-slate-900 rounded-[28px] p-5 sm:p-6 shadow-xl animate-in fade-in slide-in-from-top-2 backdrop-blur-2xl">
-          <div className="flex items-center justify-between pb-3.5 mb-3.5 border-b border-white/40 dark:border-white/10">
+        <div className="liquid-glass-card rounded-2xl p-4 sm:p-5 border-indigo-200/70 dark:border-indigo-500/30 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/70 dark:border-white/10">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black text-xs border border-blue-400/40 shadow-xs shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm">
                 AI
               </div>
               <div>
-                <h4 className="font-extrabold text-slate-800 dark:text-slate-100 text-xs sm:text-sm">รายงานวิเคราะห์เชิงลึก (Ai Engine)</h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">อัปเดตตามข้อมูลสต็อกและประวัติการเบิกใช้จริง</p>
+                <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm">สรุปผลการวิเคราะห์คลังสินค้า</h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">วิเคราะห์จากยอดคงเหลือและประวัติการเบิก-รับล่าสุด</p>
               </div>
             </div>
             <button
@@ -501,7 +508,7 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
                 setTimeout(() => handleInlineAnalysis(), 50);
               }}
               disabled={isAnalyzing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-bold text-blue-600 dark:text-blue-400 liquid-glass-pill border border-blue-400/30 hover:bg-blue-500/10 transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 transition-colors disabled:opacity-50 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
               <span>วิเคราะห์ใหม่</span>
@@ -510,10 +517,10 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
 
           {isAnalyzing && !inlineAnalysis ? (
             <div className="flex flex-col items-center justify-center gap-3 text-slate-500 dark:text-slate-400 py-6">
-              <Loader2 className="w-7 h-7 animate-spin text-blue-600 dark:text-blue-400" />
+              <Loader2 className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-400" />
               <div className="text-center">
-                <p className="font-semibold text-slate-700 dark:text-slate-200 text-xs sm:text-sm">Ai กำลังประมวลผลข้อมูลคลังสินค้า...</p>
-                <p className="text-xs text-slate-400 mt-0.5">คำนวณอัตราหมุนเวียน ดัชนีสุขภาพ และจุดสั่งซื้อฉุกเฉิน</p>
+                <p className="font-semibold text-slate-700 dark:text-slate-200 text-xs sm:text-sm">กำลังวิเคราะห์ข้อมูลคลังสินค้า...</p>
+                <p className="text-xs text-slate-400 mt-0.5">ตรวจสอบรายการใกล้หมดและแนวโน้มการเบิกใช้</p>
               </div>
             </div>
           ) : (
@@ -526,26 +533,21 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
       </div>
 
       {/* =========================================================
-          NEW: กราฟแสดงสถานะการเบิกจ่ายสินค้าแยกตามหมวดหมู่ (RECHARTS)
+          กราฟแสดงสถานะการเบิกจ่ายสินค้าแยกตามหมวดหมู่ (RECHARTS)
           ========================================================= */}
-      <div className="liquid-glass-card rounded-[32px] border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xl relative overflow-hidden w-full min-w-0">
+      <div className="rounded-3xl liquid-glass-card p-4 sm:p-5 relative overflow-hidden w-full min-w-0">
         {/* Top Header with Title and Interactive Toggles */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 mb-4 border-b border-slate-200/60 dark:border-white/10">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 mb-4 border-b border-slate-200/70 dark:border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-md shadow-blue-500/25 border border-white/30 shrink-0">
-              <BarChart3 className="w-5 h-5 stroke-[2.5]" />
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+              <BarChart3 className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  สถานะการเบิกจ่ายและเคลื่อนไหวแยกตามหมวดหมู่
-                </h2>
-                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-400/30">
-                  Recharts Analytics
-                </span>
-              </div>
+              <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
+                สถิติการเบิกออกและรับเข้าแยกตามหมวดหมู่
+              </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                เปรียบเทียบยอดเบิกใช้ (ออก) และรับเข้าสต็อก (เข้า) ของแต่ละหมวดหมู่งาน
+                เปรียบเทียบปริมาณการเบิกใช้งานและการรับอะไหล่เข้าคลังในแต่ละหมวดหมู่
               </p>
             </div>
           </div>
@@ -553,13 +555,13 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
           {/* Interactive Filters (Time Range & Chart Type) */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Time Range Filter */}
-            <div className="flex items-center p-1 rounded-2xl liquid-glass-pill border border-white/60 dark:border-white/10 text-xs shadow-2xs">
+            <div className="flex items-center p-1 rounded-full liquid-glass-pill text-xs">
               <button
                 type="button"
                 onClick={() => setCategoryTimeRange('30days')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                className={`px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
                   categoryTimeRange === '30days'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -568,9 +570,9 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setCategoryTimeRange('month')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                className={`px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
                   categoryTimeRange === 'month'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -579,9 +581,9 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setCategoryTimeRange('all')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                className={`px-3.5 py-1.5 rounded-full font-bold transition-all cursor-pointer ${
                   categoryTimeRange === 'all'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -590,14 +592,14 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({
             </div>
 
             {/* Chart Type Toggle */}
-            <div className="flex items-center p-1 rounded-2xl liquid-glass-pill border border-white/60 dark:border-white/10 text-xs shadow-2xs">
+            <div className="flex items-center p-1 rounded-full liquid-glass-pill text-xs">
               <button
                 type="button"
                 onClick={() => setCategoryChartType('bar')}
                 title="ดูกราฟแท่งเปรียบเทียบ"
-                className={`p-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1 font-bold ${
+                className={`px-3 py-1.5 rounded-full transition-all cursor-pointer flex items-center gap-1 font-bold ${
                   categoryChartType === 'bar'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >

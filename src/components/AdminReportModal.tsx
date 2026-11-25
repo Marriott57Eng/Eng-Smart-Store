@@ -94,6 +94,7 @@ export const AdminReportModal: React.FC<AdminReportModalProps> = ({
   // Generation status
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Helper to format ISO date to YYYY-MM-DD
   const formatYmd = (d: Date) => d.toISOString().slice(0, 10);
@@ -155,6 +156,7 @@ export const AdminReportModal: React.FC<AdminReportModalProps> = ({
         setSelectedUser(initialUser);
       }
       setIsSuccess(false);
+      setExportError(null);
       setIsUserDropdownOpen(false);
       setIsCategoryDropdownOpen(false);
       setIsOrderStatusDropdownOpen(false);
@@ -356,10 +358,11 @@ export const AdminReportModal: React.FC<AdminReportModalProps> = ({
 
     // Instant synchronous UI feedback - 0ms delay!
     if (currentUser?.role !== 'admin') {
-      alert('สิทธิ์การเข้าถึงถูกจำกัด: เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถออกรายงานได้');
+      setExportError('สิทธิ์การเข้าถึงถูกจำกัด: เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถออกรายงานได้');
       return;
     }
 
+    setExportError(null);
     setIsGenerating(true);
     setIsSuccess(false);
 
@@ -390,7 +393,7 @@ export const AdminReportModal: React.FC<AdminReportModalProps> = ({
           }, 3000);
         } catch (err) {
           console.error('Failed to generate PDF:', err);
-          alert('เกิดข้อผิดพลาดในการสร้างเอกสาร PDF กรุณาลองใหม่อีกครั้ง');
+          setExportError('เกิดข้อผิดพลาดในการสร้างเอกสาร PDF กรุณาลองใหม่อีกครั้ง');
         } finally {
           setIsGenerating(false);
         }
@@ -1302,6 +1305,27 @@ export const AdminReportModal: React.FC<AdminReportModalProps> = ({
           </div>
 
         </div>
+
+        {/* Inline Export Error Banner */}
+        {exportError && (
+          <div
+            role="alert"
+            className="mx-5 sm:mx-6 mb-3 px-4 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs font-semibold flex items-center justify-between gap-2 shrink-0"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+              <span className="break-words">{exportError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExportError(null)}
+              className="p-1 rounded-lg hover:bg-rose-500/15 transition-colors shrink-0 cursor-pointer"
+              aria-label="ปิดข้อความแจ้งเตือน"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Modal Bottom Actions */}
         <div className="px-5 sm:px-6 py-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200/80 dark:border-white/10 flex items-center justify-between gap-3 shrink-0">

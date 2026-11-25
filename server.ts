@@ -239,11 +239,33 @@ async function sendWebPushToAll(payload: {
 let ai: GoogleGenAI;
 function getAI(): GoogleGenAI {
   if (!ai) {
+    const httpOptions = {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    };
     ai = process.env.GEMINI_API_KEY
-      ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-      : new GoogleGenAI({});
+      ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions })
+      : new GoogleGenAI({ httpOptions });
   }
   return ai;
+}
+
+// Build model-compliant generation config:
+// - gemini-3.1-flash-lite: fastest & highest free-tier quota with ThinkingLevel.MINIMAL
+// - gemini-4-hydrogen: Gemini 4 Flash fallback with ThinkingLevel.LOW (omits deprecated sampling params)
+function buildFastGeminiConfig(modelName: string, baseConfig: Record<string, any> = {}): Record<string, any> {
+  const config: Record<string, any> = { ...baseConfig };
+  if (modelName === 'gemini-4-hydrogen') {
+    delete config.temperature;
+    delete config.topP;
+    delete config.topK;
+    delete config.candidateCount;
+    config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+  } else if (modelName === 'gemini-3.1-flash-lite') {
+    config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+  }
+  return config;
 }
 
 let firebaseApp: any = null;
@@ -2618,19 +2640,16 @@ async function startServer() {
         }
       } catch (agentError: any) {
         console.warn("Ai agent fallback to generative model:", agentError.message);
-        // Seamless fallback to ultra-fast & high-intelligence reasoning models
+        // Seamless fallback to fastest, highest-quota active Gemini Flash models
         const analysisModels = [
           "gemini-3.1-flash-lite",
-          "gemini-3.8-flash",
-          "gemini-flash-lite-latest",
-          "gemma-4-26b-a4b-it",
-          "gemini-3.5-flash-lite"
+          "gemini-4-hydrogen"
         ];
         for (const am of analysisModels) {
           try {
-            const config: any = {
+            const config = buildFastGeminiConfig(am, {
               systemInstruction: "คุณคือ Ai Executive Supply Chain & Inventory Analyst ผู้เชี่ยวชาญการวิเคราะห์คลังสินค้า Store FL.6 ให้รายงานเชิงลึก มีการเว้นวรรค ใช้สัญลักษณ์สวยงาม น่าอ่าน และแม่นยำ"
-            };
+            });
             const fallbackRes = await getAI().models.generateContent({
               model: am,
               contents: `${deepAnalysisInstruction}\n\n${prompt || 'วิเคราะห์สถานะคลังสินค้าแบบเจาะลึก'}\n\n${summaryText}`,
@@ -2750,10 +2769,8 @@ ${JSON.stringify(compactCatalog)}
       let lastError: any = null;
 
       const visionModels = [
-        "gemini-2.5-flash",
-        "gemini-3.8-flash",
-        "gemini-flash-lite-latest",
-        "gemini-3.1-flash-lite"
+        "gemini-3.1-flash-lite",
+        "gemini-4-hydrogen"
       ];
 
       for (const modelName of visionModels) {
@@ -2776,10 +2793,10 @@ ${JSON.stringify(compactCatalog)}
                 ]
               }
             ],
-            config: {
+            config: buildFastGeminiConfig(modelName, {
               responseMimeType: "application/json",
               temperature: 0.1,
-            }
+            })
           });
 
           const textOutput = response.text || '';
@@ -3197,9 +3214,9 @@ ${!isAdminUser ? `
    - ห้ามออกคำสั่ง \`export_reports\` เด็ดขาด
    - ให้ตอบปฏิเสธอย่างสุภาพทันทีว่า "ไม่พบรหัสหรือรายชื่อพนักงานดังกล่าวในระบบ Store FL.6 ค่ะ การออกรายงานรายบุคคลสามารถออกได้เฉพาะพนักงานจริงในระบบเท่านั้นค่ะ"
 
-ทำเนียบพนักงานจริงในระบบ Store FL.6:
+${isAdminUser ? `ทำเนียบพนักงานจริงในระบบ Store FL.6:
 ${getSystemEmployeeCatalogForAi()}
-
+` : ''}
 ตัวอย่างรูปแบบการตอบที่ดีเมื่อมีการถามหาสินค้า (สั้น กระชับ):
 "สวัสดีค่ะคุณ **${callingName}**! ✨
 
@@ -3247,7 +3264,10 @@ ${getSystemEmployeeCatalogForAi()}
           return "";
         }
 
-        const config: any = { systemInstruction, temperature: 0.2 };
+        const config: any = buildFastGeminiConfig(modelName, {
+          systemInstruction,
+          temperature: 0.2,
+        });
 
         const modelAbortController = new AbortController();
         let isTimedOut = false;
@@ -3263,8 +3283,8 @@ ${getSystemEmployeeCatalogForAi()}
         }
         clientAbortController.signal.addEventListener("abort", onClientAbort, { once: true });
 
-        // Responsive timeout: 4.5s per model to immediately switch if a model experiences high demand or temporary 503
-        const timeoutMs = 4500;
+        // Generous timeout (20s) so large inventory prompts never abort prematurely while still failing over cleanly
+        const timeoutMs = 20000;
         const ttftTimeout = setTimeout(() => {
           isTimedOut = true;
           modelAbortController.abort(new Error(`Timeout waiting for response on ${modelName}`));
@@ -3353,14 +3373,12 @@ ${getSystemEmployeeCatalogForAi()}
       };
 
       try {
-        // Multi-tier high availability fallback: gemini-3.1-flash-lite -> gemini-3.8-flash -> gemini-flash-lite-latest -> gemma-4-26b-a4b-it
+        // Fastest & highest-quota active Gemini models:
+        // 1. gemini-3.1-flash-lite (ThinkingLevel.MINIMAL -> lowest latency & highest free-tier quota)
+        // 2. gemini-4-hydrogen (ThinkingLevel.LOW -> fast Gemini 4 Flash fallback)
         const fallbackModels = [
-           'gemini-3.1-flash-lite',
-           'gemini-3.8-flash',
-           'gemini-flash-lite-latest',
-           'gemma-4-26b-a4b-it',
-           'gemini-3.5-flash-lite',
-           'gemini-flash-latest'
+          'gemini-3.1-flash-lite',
+          'gemini-4-hydrogen'
         ];
         rawResponseText = await generateWithFallback(fallbackModels);
       } catch (err: any) {
@@ -3675,6 +3693,21 @@ ${getSystemEmployeeCatalogForAi()}
   }
 
   if (!isProduction) {
+    // Prevent browsers from caching dev source modules across server restarts,
+    // which otherwise leaves stale ?v= Vite dep hashes and triggers duplicate React instances.
+    app.use((req, res, next) => {
+      if (
+        req.path === '/' ||
+        req.path === '/index.html' ||
+        req.path.startsWith('/src/')
+      ) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+      next();
+    });
+
     // Dynamic import to avoid loading Vite into production bundle memory
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -4171,10 +4204,9 @@ ${getSystemEmployeeCatalogForAi()}
           },
         };
 
-        // Model Priority: gemini-3.8-live (high intelligence, ultra-fast low latency) with gemini-3.1-flash-live-preview fallback
+        // Active Gemini Live Audio model (ultra-low latency)
         const liveModelsToTry = [
-          "gemini-3.8-live",
-          "gemini-3.1-flash-live-preview"
+          "gemini-3.8-live"
         ];
 
         let session: any = null;
@@ -4218,7 +4250,7 @@ ${getSystemEmployeeCatalogForAi()}
               audio: { data: item.data, mimeType: "audio/pcm;rate=16000" },
             });
           } else if (item?.type === 'text') {
-            activeLiveSession.sendClientContent({ turns: [{ role: "user", parts: [{ text: item.data }] }] });
+            activeLiveSession.sendClientContent({ turns: [{ role: "user", parts: [{ text: item.data }] }], turnComplete: true });
           }
         }
       } catch (err) {
@@ -4277,7 +4309,7 @@ ${getSystemEmployeeCatalogForAi()}
           }
         } else if (parsed.text) {
           if (activeLiveSession) {
-            activeLiveSession.sendClientContent({ turns: [{ role: "user", parts: [{ text: parsed.text }] }] });
+            activeLiveSession.sendClientContent({ turns: [{ role: "user", parts: [{ text: parsed.text }] }], turnComplete: true });
           } else {
             pendingInputQueue.push({ type: 'text', data: parsed.text });
           }

@@ -7,6 +7,7 @@ import {
   Camera, Sparkles
 } from 'lucide-react';
 import { formatRecordTimestamp } from '../utils/dateUtils';
+import { ModalPortal } from './ModalPortal';
 
 interface RequisitionViewProps {
   records: RequisitionRecord[];
@@ -32,6 +33,7 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [typeFilter, setTypeFilter] = useState<'all' | 'out' | 'in'>('all');
+  const [deletingRecord, setDeletingRecord] = useState<RequisitionRecord | null>(null);
 
   const getCategoryColor = (_cat?: string) => {
     return 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border-slate-200/90 dark:border-slate-700/80';
@@ -393,12 +395,7 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
                       </button>
                     )}
                     <button
-                      onClick={() => {
-                        const cleanId = record.id.replace(/^REQ-?/i, '');
-                        if (confirm(`คุณต้องการลบประวัติรายการ "${record.itemName}" (${cleanId}) ใช่หรือไม่?`)) {
-                          onDeleteRecord(record.id);
-                        }
-                      }}
+                      onClick={() => setDeletingRecord(record)}
                       className="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 liquid-glass-pill hover:bg-red-500/10 flex items-center gap-1 font-bold transition-all px-3 py-1.5 rounded-xl cursor-pointer border border-red-400/30 shadow-2xs"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -412,6 +409,52 @@ export const RequisitionView: React.FC<RequisitionViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Delete Record Confirmation Modal */}
+      {deletingRecord && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm">
+            <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-red-500/15 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    ยืนยันการลบประวัติ
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    รหัสรายการ: #{deletingRecord.id.replace(/^REQ-?/i, '')}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                คุณต้องการลบประวัติรายการ <strong className="text-slate-900 dark:text-white">"{deletingRecord.itemName}"</strong> ใช่หรือไม่?
+              </p>
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setDeletingRecord(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeleteRecord(deletingRecord.id);
+                    setDeletingRecord(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs shadow-md shadow-red-500/25 flex items-center gap-1.5 cursor-pointer active:scale-95"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>ลบประวัตินี้</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
     </div>
   );
 };

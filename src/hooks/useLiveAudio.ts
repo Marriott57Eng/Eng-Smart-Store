@@ -39,6 +39,7 @@ export function useLiveAudio(
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const lastAiAudioEndTimeRef = useRef<number>(0);
   const animFrameRef = useRef<number | null>(null);
   const currentVolumeRef = useRef<number>(0);
   const inputLevelRef = useRef<number>(0);
@@ -134,6 +135,9 @@ export function useLiveAudio(
       
       source.onended = () => {
         activeSourcesRef.current.delete(source);
+        if (activeSourcesRef.current.size === 0) {
+          lastAiAudioEndTimeRef.current = Date.now();
+        }
       };
 
       activeSourcesRef.current.add(source);
@@ -315,7 +319,10 @@ export function useLiveAudio(
         processor.onaudioprocess = (e) => {
           if (ws.readyState === WebSocket.OPEN) {
             const rawChannelData = e.inputBuffer.getChannelData(0);
-            const isAiPlaying = activeSourcesRef.current.size > 0;
+            const now = Date.now();
+            const isAiPlaying =
+              activeSourcesRef.current.size > 0 ||
+              now - lastAiAudioEndTimeRef.current < 650;
             
             // Fast mic input volume calculation (RMS)
             let sum = 0;
@@ -324,7 +331,6 @@ export function useLiveAudio(
               sum += rawChannelData[i] * rawChannelData[i];
             }
             const rms = Math.sqrt(sum / (rawChannelData.length / step));
-            const now = Date.now();
 
             if (isAiPlaying) {
               // AI is speaking: Protect against loudspeaker acoustic feedback.

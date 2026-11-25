@@ -70,7 +70,7 @@ export const TransactionSuccessModal: React.FC<TransactionSuccessModalProps> = (
         ? `บันทึกรับเข้า ${data.itemName || 'สินค้า'} จำนวน ${data.qty} ${data.unit || 'ชิ้น'} เรียบร้อยแล้วค่ะ`
         : `บันทึกการเบิก ${data.itemName || 'สินค้า'} จำนวน ${data.qty} ${data.unit || 'ชิ้น'} เรียบร้อยแล้วค่ะ`;
     }
-    playSuccessSoundAndSpeak(speechText);
+    playSuccessSoundAndSpeak(speechText, true);
   };
 
   const modalContent = (

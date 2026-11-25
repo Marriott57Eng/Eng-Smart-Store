@@ -97,9 +97,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     }
   }, [isOpen]);
 
-  // Generate unique PO Code and initialize form based on item or custom
+  const wasOpenKeyRef = React.useRef<string | null>(null);
+
+  // Generate unique PO Code and initialize form once when modal opens or target item changes
   useEffect(() => {
-    if (isOpen) {
+    const openKey = isOpen ? (item?.id || '__custom__') : null;
+    if (isOpen && wasOpenKeyRef.current !== openKey) {
       const now = new Date();
       const dateStr = now.getFullYear().toString() +
         String(now.getMonth() + 1).padStart(2, '0') +
@@ -145,7 +148,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         setUrgency('normal');
       }
     }
-  }, [isOpen, item, currentUser]);
+    wasOpenKeyRef.current = openKey;
+  }, [isOpen, item, currentUser?.name, currentUser?.username]);
 
   // Filter store items when searching in picker
   const filteredStoreItems = useMemo(() => {

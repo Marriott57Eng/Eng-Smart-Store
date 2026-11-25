@@ -1,10 +1,21 @@
 @import "tailwindcss";
 
-@variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @keyframes shimmer {
   100% {
     transform: translateX(100%);
+  }
+}
+
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -20,67 +31,74 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Industrial Command Pro Surface System - Crisp 1px borders, high-contrast solid surfaces */
+  /* Original Liquid Glass Surface System (auto-flattened on low-spec devices below) */
   .liquid-glass {
-    background: #ffffff;
-    border: 1px solid #cbd5e1;
-    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+    background: rgba(255, 255, 255, 0.84);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.7);
   }
 
   .dark .liquid-glass {
-    background: #111827;
-    border: 1px solid #1e293b;
-    box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.45);
+    background: rgba(15, 23, 42, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    box-shadow: 0 8px 28px -4px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
   }
 
-  /* Universal Industrial Card: Crisp 1px border, solid high-contrast surface, zero blur overhead */
   .liquid-glass-card {
-    background: #ffffff;
-    border: 1px solid #cbd5e1;
-    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    box-shadow: 0 2px 10px -2px rgba(15, 23, 42, 0.06), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
   }
 
   .dark .liquid-glass-card {
-    background: #111827;
-    border: 1px solid #1e293b;
-    box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.45);
+    background: rgba(15, 23, 42, 0.88);
+    border: 1px solid rgba(51, 65, 85, 0.65);
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
   }
 
   .liquid-glass-pill {
-    background: #f8fafc;
-    border: 1px solid #cbd5e1;
-    box-shadow: none;
+    background: rgba(241, 245, 249, 0.85);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   }
 
   .dark .liquid-glass-pill {
-    background: #1e293b;
-    border: 1px solid #334155;
-    box-shadow: none;
+    background: rgba(30, 41, 59, 0.82);
+    border: 1px solid rgba(71, 85, 105, 0.55);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   }
 
   .liquid-glass-input {
-    background: #f8fafc;
-    border: 1px solid #cbd5e1;
-    box-shadow: inset 0 1px 2px 0 rgba(15, 23, 42, 0.03);
+    background: rgba(248, 250, 252, 0.92);
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    box-shadow: inset 0 1px 2px 0 rgba(15, 23, 42, 0.04);
   }
 
   .dark .liquid-glass-input {
-    background: #0f172a;
-    border: 1px solid #334155;
-    box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(51, 65, 85, 0.75);
+    box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.3);
   }
 
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
 
+  .animate-card-enter {
+    animation: cardFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   /* Specular rim glare */
   .specular-rim {
-    background: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
   }
 
   .dark .specular-rim {
-    background: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
   }
 }
 
@@ -127,14 +145,14 @@ html[data-font="system"], body[data-font="system"] {
 html {
   -webkit-text-size-adjust: 100%;
   scrollbar-gutter: stable;
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100%;
 }
 
 html, body {
   margin: 0;
   padding: 0;
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100%;
   font-family: var(--app-font);
   font-size: 16px;
@@ -168,6 +186,11 @@ button, a, input, select, textarea {
   touch-action: manipulation;
 }
 
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 #root {
   min-height: 100%;
   min-height: 100dvh;
@@ -198,7 +221,7 @@ button, a, input, select, textarea {
 }
 
 .pt-safe-header {
-  padding-top: max(12px, calc(env(safe-area-inset-top, 0px) + 10px));
+  padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
 }
 
 .pt-safe-content {
@@ -223,9 +246,11 @@ button, a, input, select, textarea {
   }
 }
 
-/* Ensure inputs on iOS safari don't trigger automatic zoom */
-input, textarea, select {
-  font-size: 16px;
+/* Prevent iOS Safari auto-zoom on mobile inputs without enlarging desktop compact inputs */
+@media (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px;
+  }
 }
 
 /* Device-responsive Auto-scaling */
@@ -269,10 +294,17 @@ code, pre {
       Eliminates backdrop-filter blurs, large Gaussian blur orbs, continuous
       idle animations, and heavy multi-layer shadows to keep CPU load near 0%
       and scrolling locked at 60fps.
-   2. High-Spec / Newer Phones & Desktops ([data-low-spec="false"]):
-      Uses GPU hardware-accelerated glass blurs, smooth spring transitions,
-      and rich depth shadows.
+   2. Reduced-motion accessibility compliance
    ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 [data-low-spec="true"] *,
 [data-low-spec="true"] *::before,
 [data-low-spec="true"] *::after {
@@ -332,23 +364,16 @@ code, pre {
   box-shadow: none !important;
 }
 
-/* Hardware-accelerated layer promotion ONLY for fixed/sticky navigation bars */
-header, nav {
-  transform: translateZ(0);
-  will-change: transform;
-}
-
 /* Content visibility auto for offscreen cards so browser skips offscreen layout & paint */
 .item-card-container {
   content-visibility: auto;
-  contain-intrinsic-size: auto 176px;
+  contain-intrinsic-size: auto 184px;
 }
 
-/* Fix html2canvas FontMetrics baseline calculation with Tailwind CSS.
-   Tailwind's img { display: block } forces html2canvas's invisible measuring <img> onto a new line,
-   which shifts text baseline downward by 10-15px and slices rendered text in half vertically. */
+/* Fix html2canvas FontMetrics baseline calculation with Tailwind CSS. */
 img[src^="data:image"] {
   display: inline !important;
 }
+
 
 

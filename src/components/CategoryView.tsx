@@ -73,31 +73,31 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
   return (
     <div className="p-3 sm:p-4 md:p-5 space-y-3.5 pb-28 sm:pb-32 max-w-7xl mx-auto w-full min-w-0 overflow-x-hidden transition-colors duration-200">
       {/* Header */}
-      <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
-            <Boxes className="w-4.5 h-4.5" />
+      <div className="flex items-center justify-between liquid-glass-card p-4 rounded-2xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/25">
+            <Boxes className="w-5 h-5" />
           </div>
           <div>
             <h1 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight">
               หมวดหมู่อะไหล่ในคลัง
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              จำแนกตามระบบงานวิศวกรรม ({summary?.categories.length || 0} หมวดหมู่)
+              เลือกหมวดหมู่เพื่อดูรายการอะไหล่ ({summary?.categories.length || 0} หมวดหมู่)
             </p>
           </div>
         </div>
       </div>
 
       {/* Category Bento Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 w-full min-w-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 w-full min-w-0">
         {summary?.categories.map((cat, idx) => {
           const catImg = getCategoryImageUrl(cat.name);
           const stats = categoryStatsMap[cat.name] || { outCount: 0, lowCount: 0 };
           const outOfStockItemsInCat = stats.outCount;
           const lowStockItemsInCat = stats.lowCount;
 
-          const cardClassName = "rounded-xl overflow-hidden shadow-2xs hover:shadow-md hover:border-blue-500 dark:hover:border-blue-500 transition-all cursor-pointer group flex flex-col justify-between border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 relative w-full min-w-0 box-border";
+          const cardClassName = "rounded-2xl overflow-hidden liquid-glass-card hover:border-blue-400/60 transition-all cursor-pointer group flex flex-col justify-between relative w-full min-w-0 box-border";
 
           const cardContent = (
             <>
@@ -120,30 +120,30 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
                 {/* Category Badge & Icon */}
                 <div className="absolute bottom-2.5 left-3 right-3 flex items-end justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-white/95 dark:bg-slate-900/95 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-700">
+                    <div className="w-8 h-8 rounded-xl bg-white/95 dark:bg-slate-900/90 flex items-center justify-center shrink-0 shadow-sm">
                       {getCategoryIcon(cat.name)}
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-bold text-white text-sm sm:text-base leading-tight truncate">
                         {cat.name}
                       </h3>
-                      <span className="text-[11px] font-mono text-slate-200 tabular-nums">
+                      <span className="text-[11px] text-slate-200 tabular-nums">
                         {cat.count} รายการ
                       </span>
                     </div>
                   </div>
 
-                  {/* Stock status badges */}
+                  {/* Stock status pills */}
                   <div className="flex items-center gap-1 shrink-0">
                     {outOfStockItemsInCat > 0 && (
-                      <span className="bg-red-600 text-white text-[10px] font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-1 tabular-nums">
+                      <span className="bg-red-500/95 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 tabular-nums shadow-xs">
                         <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
                         <span>หมด {outOfStockItemsInCat}</span>
                       </span>
                     )}
 
                     {lowStockItemsInCat > 0 && (
-                      <span className="bg-amber-500 text-slate-950 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-1 tabular-nums">
+                      <span className="bg-amber-400/95 text-slate-950 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 tabular-nums shadow-xs">
                         <AlertCircle className="w-2.5 h-2.5 shrink-0" />
                         <span>ใกล้หมด {lowStockItemsInCat}</span>
                       </span>
@@ -153,17 +153,17 @@ export const CategoryView: React.FC<CategoryViewProps> = ({
               </div>
 
               {/* Bottom Details */}
-              <div className="p-3 bg-white dark:bg-slate-900 flex items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="p-3.5 flex items-center justify-between gap-2">
                 <div className="flex-1 min-w-0 pr-2">
                   <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
                     {getCategoryDescription(cat.name)}
                   </p>
                   <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mt-0.5 tabular-nums">
-                    คงเหลือรวม <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{cat.totalQty.toLocaleString()}</span> หน่วย
+                    คงเหลือรวม <span className="text-blue-600 dark:text-blue-400 font-extrabold">{cat.totalQty.toLocaleString()}</span> หน่วย
                   </p>
                 </div>
 
-                <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 group-hover:bg-blue-600 text-slate-500 dark:text-slate-400 group-hover:text-white flex items-center justify-center shrink-0 transition-colors border border-slate-200 dark:border-slate-700">
+                <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-white/8 group-hover:bg-gradient-to-br group-hover:from-blue-500 group-hover:to-indigo-600 text-slate-500 dark:text-slate-400 group-hover:text-white flex items-center justify-center shrink-0 transition-all">
                   <ChevronRight className="w-4 h-4" />
                 </div>
               </div>

@@ -75,10 +75,24 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
     setIsProcessing(false);
   }, []);
 
+  // Helper to post an inline assistant notice instead of blocking window.alert
+  const appendAssistantNotice = useCallback((text: string) => {
+    setChatHistory((prev) => [
+      ...prev,
+      {
+        id: `notice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'assistant',
+        text,
+        timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+        source: 'text',
+      },
+    ]);
+  }, [setChatHistory]);
+
   // Download handler for PDF & Excel (Strictly restricted to Admin)
   const handleDownloadReport = useCallback(async (report: any, msgId: string, isExcel: boolean = false) => {
     if (currentUser?.role !== 'admin') {
-      alert('🔒 ขออภัยด้วยนะคะ: การดาวน์โหลดรายงานเอกสาร PDF สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นค่ะ');
+      appendAssistantNotice('🔒 ขออภัยด้วยนะคะ: การดาวน์โหลดรายงานเอกสาร PDF สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นค่ะ');
       return;
     }
     try {
@@ -112,11 +126,11 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
       }
     } catch (err) {
       console.error('Error generating report:', err);
-      alert('เกิดข้อผิดพลาดในการสร้างไฟล์');
+      appendAssistantNotice('❌ เกิดข้อผิดพลาดในการสร้างไฟล์รายงาน กรุณาลองใหม่อีกครั้งค่ะ');
     } finally {
       setGeneratingPdfId(null);
     }
-  }, [items, requisitions, orders, currentUser]);
+  }, [items, requisitions, orders, currentUser, appendAssistantNotice]);
 
   const handleLiveToolCall = useCallback((toolCall: any) => {
     if (!toolCall) return;
@@ -597,7 +611,7 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
     if (isProcessing) return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('เบราว์เซอร์นี้ไม่รองรับไมโครโฟนสำหรับสั่งพิมพ์ด้วยเสียง กรุณาใช้ Google Chrome, Safari หรือ Edge บนมือถือหรือคอมพิวเตอร์');
+      appendAssistantNotice('⚠️ เบราว์เซอร์นี้ไม่รองรับไมโครโฟนสำหรับสั่งพิมพ์ด้วยเสียง กรุณาใช้ Google Chrome, Safari หรือ Edge ค่ะ');
       return;
     }
 
@@ -640,9 +654,9 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
         console.warn('Speech recognition error:', event.error);
         setIsListening(false);
         if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-          alert('ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณากดอนุญาตการใช้งานไมโครโฟนในตั้งค่าเบราว์เซอร์ของคุณเพื่อสั่งพิมพ์ด้วยเสียง');
+          appendAssistantNotice('🎙️ ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณากดอนุญาตการใช้งานไมโครโฟนในตั้งค่าเบราว์เซอร์ค่ะ');
         } else if (event.error === 'network') {
-          alert('เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่ายสำหรับระบบแปลงเสียงเป็นข้อความ');
+          appendAssistantNotice('⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่ายสำหรับระบบแปลงเสียงเป็นข้อความค่ะ');
         }
       };
 
@@ -662,7 +676,7 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
     } catch (err: any) {
       console.error('Failed to start speech recognition:', err);
       setIsListening(false);
-      alert('ไม่สามารถเริ่มระบบรับเสียงได้ กรุณาตรวจสอบการตั้งค่าสิทธิ์ไมโครโฟน');
+      appendAssistantNotice('🎙️ ไม่สามารถเริ่มระบบรับเสียงได้ กรุณาตรวจสอบการตั้งค่าสิทธิ์ไมโครโฟนค่ะ');
     }
   };
 
@@ -950,12 +964,15 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, isListening, transcript]);
 
+  const confirmedActionIdsRef = useRef<Set<string>>(new Set());
+
   // Handle user confirming a DB action (Stock in / Stock out / update)
   const handleConfirmDbAction = useCallback(async (messageId: string, action: DbActionPayload) => {
     if (!action) return;
+    if (confirmedActionIdsRef.current.has(messageId)) return;
 
     if ((action.action === 'update_stock' || (action.action as any) === 'edit_item') && currentUser?.role !== 'admin') {
-      alert('เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถแก้ไขสต็อกหรือชื่ออะไหล่ได้');
+      appendAssistantNotice('🔒 เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถแก้ไขสต็อกหรือชื่ออะไหล่ได้ค่ะ');
       return;
     }
 
@@ -963,6 +980,8 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
       const isAllowed = await verifyLocation();
       if (!isAllowed) return;
     }
+
+    confirmedActionIdsRef.current.add(messageId);
 
     // 1. Execute DB Action to Firestore / state (Suppress redundant chime/TTS when in Live Speech)
     if (onExecuteDbAction) {
@@ -988,17 +1007,12 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
       const itemName = action.item?.name || action.record?.itemName || 'สินค้า';
       const itemQty = action.record?.qty || 1;
       const itemUnit = action.item?.unit || action.record?.unit || 'หน่วย';
-      sendMessage(`บันทึกการทำรายการ${actionName} ${itemName} จำนวน ${itemQty} ${itemUnit} เรียบร้อยแล้ว แจ้งผลยืนยันด้วยเสียงสั้นๆ`);
-    } else {
-      // For typed / text chat requisition, speak using browser Thai SpeechSynthesis
-      const textToSpeak = action.action === 'stock_in' 
-        ? 'ยืนยันรับเข้าสินค้าเรียบร้อยแล้วค่ะ'
-        : action.action === 'requisition'
-        ? 'ยืนยันการเบิกสินค้าเรียบร้อยแล้วค่ะ'
-        : 'ยืนยันเรียบร้อยแล้วค่ะ';
-      playSuccessSoundAndSpeak(textToSpeak);
+      sendMessage(`บันทึกการทำรายการ${actionName} ${itemName} จำนวน ${itemQty} ${itemUnit} เรียบร้อยแล้ว แจ้งผลยืนยันด้วยเสียงสั้นๆ 1 ประโยคเดียว ห้ามพูดซ้ำ`);
+    } else if (action.action !== 'requisition' && action.action !== 'stock_in') {
+      // For non-requisition/stock_in actions (e.g. update_stock), speak confirmation
+      playSuccessSoundAndSpeak('ยืนยันเรียบร้อยแล้วค่ะ');
     }
-  }, [onExecuteDbAction, setChatHistory, isLiveConnected, sendMessage, verifyLocation, currentUser]);
+  }, [onExecuteDbAction, setChatHistory, isLiveConnected, sendMessage, verifyLocation, currentUser, appendAssistantNotice]);
 
   // Handle user cancelling a DB action
   const handleCancelDbAction = useCallback((messageId: string) => {
@@ -1027,7 +1041,7 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
     if (!report) return;
 
     if (currentUser?.role !== 'admin') {
-      alert('เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถออกรายงาน PDF ได้');
+      appendAssistantNotice('🔒 เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถออกรายงาน PDF ได้ค่ะ');
       return;
     }
 
@@ -1055,9 +1069,9 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
       }
     } catch (err) {
       console.error('Error generating confirmed report:', err);
-      alert('เกิดข้อผิดพลาดในการสร้างเอกสารรายงาน กรุณาลองใหม่อีกครั้ง');
+      appendAssistantNotice('❌ เกิดข้อผิดพลาดในการสร้างเอกสารรายงาน กรุณาลองใหม่อีกครั้งค่ะ');
     }
-  }, [currentUser, handleDownloadReport, setChatHistory, isLiveConnected, sendMessage]);
+  }, [currentUser, handleDownloadReport, setChatHistory, isLiveConnected, sendMessage, appendAssistantNotice]);
 
   // Handle user cancelling a Report Generation
   const handleCancelReport = useCallback((messageId: string, reportTitle?: string) => {
@@ -1541,7 +1555,7 @@ export const VoiceAssistantView: React.FC<VoiceAssistantViewProps> = ({
                 const isPending = msg.isPendingConfirmation && isIndividualReport && !msg.isCancelled;
                 const isCancelled = msg.isCancelled;
                 const isGenerating = generatingPdfId === (msg.id + idx);
-                const requesterName = report.requestedBy || currentUser?.nickname || currentUser?.name || 'ผู้ใช้งาน';
+                const requesterName = report.requestedBy || currentUser?.name || 'ผู้ใช้งาน';
 
                 return (
                   <div key={idx} className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">

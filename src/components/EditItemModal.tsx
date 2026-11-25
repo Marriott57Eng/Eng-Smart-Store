@@ -40,8 +40,11 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
   const [error, setError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const wasOpenIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    if (isOpen && item) {
+    const currentKey = isOpen && item ? item.id : null;
+    if (currentKey && wasOpenIdRef.current !== currentKey && item) {
       setId(item.id || '');
       setName(item.name || '');
       setCategory(item.category || (categories[0] || 'เคมี'));
@@ -56,7 +59,8 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       setError('');
       setShowDeleteConfirm(false);
     }
-  }, [isOpen, item, categories]);
+    wasOpenIdRef.current = currentKey;
+  }, [isOpen, item]);
 
   if (!isOpen || !item) return null;
 
